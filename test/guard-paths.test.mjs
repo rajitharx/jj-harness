@@ -46,6 +46,8 @@ for (const [path, pattern] of MUST_BLOCK) {
     const v = await edit(path);
     assert.equal(v.kind, "block");
     assert.ok(v.reason.includes(`"${pattern}"`), `reason names the pattern: ${v.reason}`);
+    // Dogfood finding: without this, the agent told the user to drop .env from protectedPaths, which can't work.
+    assert.match(v.reason, /can add protected paths but can't remove the built-in ones/);
   });
 }
 

@@ -24,7 +24,7 @@ export async function guardPaths(input, config) {
     if (subjects.some((p) => globToRegExp(pattern).test(p))) {
       return {
         kind: "block",
-        reason: `Blocked ${input.tool_name} on ${raw}: it matches the protected path pattern "${pattern}" (config.protectedPaths). Secrets, keys and .git internals are off-limits to the agent. Ask the user to make this change themselves, or read configuration from a non-secret file instead.`,
+        reason: `Blocked ${input.tool_name} on ${raw}: it matches the protected path pattern "${pattern}" (config.protectedPaths). Secrets, keys and .git internals are off-limits to the agent. Ask the user to make this change themselves, or read configuration from a non-secret file instead. (A project's .harness/config.json can add protected paths but can't remove the built-in ones: .env files, keys and .git.)`,
       };
     }
   }
