@@ -1,0 +1,7 @@
+{
+  "name": "jj-harness",
+  "owner": { "name": "rajitharx" },
+  "plugins": [
+    { "name": "harness", "source": "./", "description": "Reusable agent harness for any project." }
+  ]
+}
