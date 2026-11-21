@@ -1,0 +1,6 @@
+{
+  "verify": { "format": "", "lint": "", "typecheck": "", "test": "" },
+  "protectedPaths": [],
+  "blockedCommands": [],
+  "stopGate": { "enabled": true, "maxAttempts": 3 }
+}

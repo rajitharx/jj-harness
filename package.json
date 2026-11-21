@@ -1,0 +1,10 @@
+{
+  "name": "jj-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reusable Claude Code agent harness plugin.",
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test \"test/**/*.test.mjs\"" },
+  "license": "MIT"
+}

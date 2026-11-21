@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run.mjs\" SessionStart" }] }],
+    "PreToolUse":   [{ "matcher": "Bash|Edit|Write|MultiEdit", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run.mjs\" PreToolUse" }] }],
+    "PostToolUse":  [{ "matcher": "Edit|Write|MultiEdit", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run.mjs\" PostToolUse" }] }],
+    "Stop":         [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run.mjs\" Stop" }] }]
+  }
+}
