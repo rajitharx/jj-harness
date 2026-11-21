@@ -167,7 +167,7 @@ test("e2e: one session through SessionStart, guards, format-on-edit and the Stop
   //    user so (typecheck isn't configured, so it isn't listed). A second Stop
   //    with nothing new changed allows silently without running anything.
   writeFile(root, "src/a.js", "export const a = 10;\n");
-  assert.deepEqual(stop(ctx, true).out, { systemMessage: "harness: lint ✓ test ✓ (2 changed files)" });
+  assert.deepEqual(stop(ctx, true).out, { systemMessage: "harness: lint ✓ (1 file) test ✓ (1 file)" });
   const ran = calls(log).length;
   assert.deepEqual(calls(log).slice(-2), [["lint", ["src/a.js"]], ["test", ["src/a.js"]]]);
   assert.deepEqual(stop(ctx).out, {});

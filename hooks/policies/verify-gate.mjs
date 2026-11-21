@@ -69,7 +69,7 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
   }
 
   const files = stageFiles(changed);
-  /** @type {[string, "passed" | "skipped"][]} */
+  /** @type {[string, "passed" | "skipped", number | undefined][]} */
   const done = [];
   for (const stage of stages) {
     const remaining = deadline - Date.now();
@@ -78,7 +78,7 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
       timeoutMs: Math.min(config.stopGate.timeoutSec * 1000, remaining),
     });
     if (result.ok) {
-      done.push([stage, result.skipped ? "skipped" : "passed"]);
+      done.push([stage, result.skipped ? "skipped" : "passed", result.fileCount]);
       continue;
     }
     if (result.timedOut && Date.now() >= deadline) return deadlinePassed(stage, done, log);
@@ -102,7 +102,7 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
   }
   delete state.attempts[session];
   writeState(config.root, state, log);
-  return passNotice(done, files.length);
+  return passNotice(done);
 }
 
 /** @returns {import("../../lib/harness.mjs").Verdict} */
@@ -110,18 +110,25 @@ function notice(text) {
   return { kind: "notice", text: `harness: ${text}` };
 }
 
-/** One mark per stage: `lint ✓`, `typecheck skipped`. */
+/**
+ * One mark per stage: `lint ✓ (1 file)`, `typecheck ✓`, `test skipped`. The count
+ * is what the stage's command was given (after its `files` filter), so it is
+ * shown only for stages that got paths; a whole-project stage has none.
+ */
 function stageSummary(done) {
-  return done.map(([stage, outcome]) => `${stage} ${outcome === "passed" ? "✓" : "skipped"}`).join(" ");
+  return done
+    .map(([stage, outcome, count]) => {
+      if (outcome !== "passed") return `${stage} skipped`;
+      return count === undefined ? `${stage} ✓` : `${stage} ✓ (${count} file${count === 1 ? "" : "s"})`;
+    })
+    .join(" ");
 }
 
-/** `harness: lint ✓ test ✓ (2 changed files)`, but never a pass when every stage was skipped. */
-function passNotice(done, fileCount) {
-  const scope = fileCount
-    ? `${fileCount} changed file${fileCount === 1 ? "" : "s"}`
-    : "no changed files to pass: only deletions or .harness/";
-  if (!done.some(([, outcome]) => outcome === "passed")) return notice(`no checks ran (${stageSummary(done)}; ${scope})`);
-  return notice(`${stageSummary(done)} (${scope})`);
+/** `harness: lint ✓ (1 file) typecheck ✓ test ✓ (1 file)`, but never a pass when every stage was skipped. */
+function passNotice(done) {
+  const summary = stageSummary(done);
+  if (!done.some(([, outcome]) => outcome === "passed")) return notice(`no checks ran (${summary})`);
+  return notice(summary);
 }
 
 function listChanges(root) {

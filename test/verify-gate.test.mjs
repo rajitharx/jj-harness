@@ -89,39 +89,58 @@ test("output tail is capped at about 8 KB and keeps the end", async () => {
   assert.ok(verdict.reason.length < 9 * 1024, `reason length ${verdict.reason.length}`);
 });
 
-test("a pass tells the user which checks ran, which were skipped, and on how many files", async () => {
+test("a pass tells the user which checks ran, which were skipped, and how many files each got", async () => {
   const ts = (run) => ({ run, files: ["**/*.ts"] });
   const PASS_FILES = "true {files}";
+  const PASS_DIRS = "true {dirs}";
   const cases = [
     {
-      name: "every stage ran",
+      name: "every stage ran: a whole-project stage has no count",
       verify: { lint: PASS_FILES, typecheck: PASS, test: PASS_FILES },
       change: (root) => (touch(root), touch(root, "README.md")),
-      text: "harness: lint ✓ typecheck ✓ test ✓ (2 changed files)",
+      text: "harness: lint ✓ (2 files) typecheck ✓ test ✓ (2 files)",
+    },
+    {
+      name: "a filter drops files: each stage shows what it received, not what changed",
+      verify: { lint: ts(PASS_FILES), test: ts(PASS_FILES) },
+      change: (root) => (touch(root), touch(root, "README.md"), touch(root, "docs/x.md")),
+      text: "harness: lint ✓ (1 file) test ✓ (1 file)",
+    },
+    {
+      name: "a filtered whole-project stage that ran has no count",
+      verify: { lint: ts(PASS_FILES), typecheck: ts(PASS) },
+      change: (root) => (touch(root), touch(root, "README.md")),
+      text: "harness: lint ✓ (1 file) typecheck ✓",
+    },
+    {
+      name: "a {dirs} stage counts the files its directories came from",
+      verify: { lint: PASS_DIRS },
+      change: (root) => (touch(root), touch(root, "src/b.ts"), touch(root, "README.md")),
+      text: "harness: lint ✓ (3 files)",
     },
     {
       name: "a filtered stage is listed as skipped",
       verify: { lint: ts(PASS_FILES), test: PASS },
       change: (root) => touch(root, "README.md"),
-      text: "harness: lint skipped test ✓ (1 changed file)",
+      text: "harness: lint skipped test ✓",
     },
     {
       name: "only configured stages are listed",
-      verify: { test: PASS },
+      verify: { test: PASS_FILES },
       change: (root) => touch(root),
-      text: "harness: test ✓ (1 changed file)",
+      text: "harness: test ✓ (1 file)",
     },
     {
       name: "nothing ran is never a pass",
       verify: { lint: ts(PASS_FILES), test: ts(PASS) },
       change: (root) => touch(root, "README.md"),
-      text: "harness: no checks ran (lint skipped test skipped; 1 changed file)",
+      text: "harness: no checks ran (lint skipped test skipped)",
     },
     {
       name: "only deletions: {files} stages skip, whole-project stages run",
       verify: { lint: PASS_FILES, typecheck: PASS },
       change: (root) => rmSync(join(root, "src/a.ts")),
-      text: "harness: lint skipped typecheck ✓ (no changed files to pass: only deletions or .harness/)",
+      text: "harness: lint skipped typecheck ✓",
     },
   ];
   for (const { name, verify, change, text } of cases) {
@@ -135,7 +154,7 @@ test("a pass saves the fingerprint; the next stop allows silently without re-run
   const c = counter(0);
   const root = repo({ test: c.cmd });
   touch(root);
-  assert.deepEqual((await stop(root)).verdict, { kind: "notice", text: "harness: test ✓ (1 changed file)" });
+  assert.deepEqual((await stop(root)).verdict, { kind: "notice", text: "harness: test ✓" });
   assert.equal(c.runs(), 1);
   assert.deepEqual((await stop(root)).verdict, { kind: "allow" }, "no repeated notice on an unchanged tree");
   assert.deepEqual((await stop(root, { session: "other" })).verdict, { kind: "allow" });
@@ -237,7 +256,7 @@ test("{files} receives only changed, non-deleted files, root-relative", async ()
   rmSync(join(root, "e.ts"));
   touch(root, "dir/f g's.ts", "untracked\n");
   touch(root, ".harness/progress.md", "- harness files are not source\n");
-  assert.deepEqual((await stop(root)).verdict, { kind: "notice", text: "harness: test ✓ (4 changed files)" });
+  assert.deepEqual((await stop(root)).verdict, { kind: "notice", text: "harness: test ✓ (4 files)" });
   assert.deepEqual(JSON.parse(readFileSync(out, "utf8")), ["a.ts", "b.ts", "d.ts", "dir/f g's.ts"]);
 });
 
@@ -259,7 +278,7 @@ test("file filters: a docs-only change skips filtered stages and never reaches s
   touch(root, "README.md", "docs only\n");
   assert.deepEqual((await stop(root)).verdict, {
     kind: "notice",
-    text: "harness: no checks ran (lint skipped typecheck skipped; 1 changed file)",
+    text: "harness: no checks ran (lint skipped typecheck skipped)",
   });
   assert.equal(lint.runs() + typecheck.runs(), 0);
   touch(root, "src/a.ts");

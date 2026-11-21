@@ -4,7 +4,7 @@ import { loadConfig } from "../lib/config.mjs";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildCommand, pathArg, runStage, shellQuote, stageFiles } from "../lib/verify.mjs";
+import { buildCommand, pathArg, planStage, runStage, shellQuote, stageFiles } from "../lib/verify.mjs";
 import { makeProject, writeFile } from "./helpers.mjs";
 
 const cmd = (run) => (run === undefined ? undefined : { run });
@@ -124,6 +124,30 @@ test("runStage skips unconfigured stages and {files} with no files", async () =>
   const r = await runStage("typecheck", config, []);
   assert.equal(r.skipped, false, "no {files}: runs as written");
   assert.deepEqual(JSON.parse(r.output), []);
+});
+
+test("runStage reports how many files the command was given, and none for whole-project commands", async () => {
+  const config = project({
+    lint: { run: "node argv.cjs {files}", files: ["**/*.ts"] },
+    test: { run: "node argv.cjs {dirs}", files: ["**/*.ts"] },
+    typecheck: { run: "node argv.cjs", files: ["**/*.ts"] },
+    format: "node argv.cjs",
+  });
+  const files = ["a.ts", "src/b.ts", "README.md", "docs/x.md"];
+  const counts = {};
+  for (const stage of ["lint", "test", "typecheck", "format"]) {
+    const r = await runStage(stage, config, files);
+    counts[stage] = "fileCount" in r ? r.fileCount : "absent";
+  }
+  assert.deepEqual(counts, { lint: 2, test: 2, typecheck: "absent", format: 4 });
+  const skipped = await runStage("lint", config, ["README.md"]);
+  assert.equal("fileCount" in skipped, false, "a skipped stage has no count");
+  assert.deepEqual(planStage("lint", config.verify.lint, files), {
+    command: "node argv.cjs a.ts src/b.ts",
+    fileCount: 2,
+  });
+  assert.deepEqual(planStage("typecheck", config.verify.typecheck, files), { command: "node argv.cjs" });
+  assert.equal(planStage("typecheck", config.verify.typecheck, ["README.md"]), null);
 });
 
 test("runStage reports non-zero exits with combined output", async () => {
