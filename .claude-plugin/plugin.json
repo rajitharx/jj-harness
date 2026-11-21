@@ -1,6 +1,6 @@
 {
   "name": "harness",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reusable agent harness: guardrails, verification loop, workflow skills and review agents for any project.",
   "author": { "name": "rajitharx" },
   "license": "MIT",
