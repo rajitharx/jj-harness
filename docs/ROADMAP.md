@@ -9,7 +9,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 0 | Scaffold and design sketch | ✅ |
 | 1 | Core runtime: config and hook dispatch | ✅ |
 | 2 | Guardrails | ✅ |
-| 3 | Quality loop | ⬜ |
+| 3 | Quality loop | ✅ |
 | 4 | Workflow skills | ⬜ |
 | 5 | Agents | ⬜ |
 | 6 | Dogfood and release | ⬜ |
@@ -36,16 +36,19 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - [x] `guard-paths`: deny Edit/Write/MultiEdit/NotebookEdit on `config.protectedPaths` (zero-dependency glob matching relative to `config.root`; `**/` patterns also match absolute paths outside the root)
 - [x] Tests: tables of commands and paths that must be denied, and ones that must be allowed, plus an end-to-end `run.mjs` deny
 
-## 3. Quality loop ⬜
+## 3. Quality loop ✅
 
-- [ ] `format-on-edit`: run `verify.format` on the edited file, report failures as context
-- [ ] `verify-gate`: on Stop, if the tree changed, run lint, typecheck and test; block with the failure output; respect `stop_hook_active` and `stopGate.maxAttempts`
-- [ ] `session-context`: branch, dirty files, verify commands, tail of `.harness/progress.md`
-- [ ] Tests for each policy, including the loop guard
+- [x] `lib/verify.mjs`: the one way to run a `verify.*` command. `{files}` is replaced with the shell-quoted, root-relative changed files (stage skipped when there are none); `format` without `{files}` gets the path appended; other commands run as written. Runs through the shell in `config.root` with `CI=1` and a timeout that kills the process group
+- [x] `format-on-edit`: after Edit/Write/MultiEdit, run `verify.format` on the edited file (30 s limit); silent on success, failure tail as context, never blocks
+- [x] `verify-gate`: on Stop, if the tree differs from HEAD (`git status --porcelain`), run lint, typecheck and test (related files only where the command uses `{files}`), each limited by `stopGate.timeoutSec`; block with the stage, command and output tail; skip re-runs when the changed-file fingerprint matches the last pass; give up after `stopGate.maxAttempts` consecutive blocks per session (`stop_hook_active` alone never bypasses it)
+- [x] `session-context`: branch, dirty files (first 10), verify commands with the `{files}` note, the last 40 lines of `.harness/progress.md`, and a `harness-init` hint when there's no config; about 2 KB at most
+- [x] Hook timeouts in `hooks.json`: Stop 900 s, PostToolUse 60 s
+- [x] Tests for each policy against real temp git repos, including the loop guard, fingerprint, per-session attempts, timeouts and fail-open paths
 
 ## 4. Workflow skills ⬜
 
 - [ ] `harness-init`: detect the stack, propose verify commands and test that they run, write the config, `CLAUDE.md`, `AGENTS.md` and `progress.md`; never overwrite an existing `CLAUDE.md`
+- [ ] `harness-init` generates `{files}`-based related-test commands per stack, so the Stop gate checks only related tests: `jest --findRelatedTests {files}`, `vitest related --run {files}`, `go test` on the changed packages, pytest on matching test files, plus per-file lint (`eslint {files}`, `ruff check {files}`). Commands must tolerate non-source paths in `{files}` (e.g. eslint's `--no-warn-ignored`)
 - [ ] `plan`: write `.harness/plans/<slug>.md`
 - [ ] `verify`: run the checks and report the output exactly
 - [ ] `review`: send the diff to the `reviewer` agent and check each finding
@@ -145,3 +148,47 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - `.git` inside submodules or other repos isn't protected, because the default is `.git/**`, not `**/.git/**`.
 - The defaults block `.env.example` (it matches `.env.*`), and because project `protectedPaths` only extend the defaults, a project can't unblock it. Open question: a future `allowPaths` setting, or excluding `.env.example`/`.env.sample`/`.env.template` by default. `.envrc` isn't protected by default.
 - Case-insensitive path matching also applies on case-sensitive Linux filesystems. That's slightly over-protective, but safe.
+- A script piped or here-stringed into a shell isn't checked as a nested command: `echo 'rm -rf /' | bash` and `bash <<< "rm -rf /"` are allowed. Only heredocs fed to a shell, `bash -c`, `eval` and substitutions are re-parsed. (Raised in the PR #2 review.)
+
+### Step 3: Quality loop (2026-11-21)
+
+**Shipped**
+- `lib/verify.mjs` (private helper): `runStage(name, config, files, { timeoutMs })` returns `{ ok, skipped, output, command, exitCode, timedOut }`. It owns the `{files}` placeholder: substitution with shell-quoted, root-relative paths (plain paths stay unquoted for readability), skipping a `{files}` stage when no files changed, and appending the path for `format`. Commands run through the shell in `config.root` with `CI=1`, in their own process group so a timeout SIGKILLs the whole tree. Output is kept as a 64 KB tail. It never throws.
+- `lib/git.mjs` (private helper): `changedFiles(root)` parses `git status --porcelain=v1 -z --untracked-files=all -- .`. Renames use the new path, deleted files are flagged, and paths are relative to `config.root` even when it's a subdirectory of the repo. `currentBranch(root)` runs `git rev-parse --abbrev-ref HEAD`.
+- `verify-gate` (Stop): allows when disabled, when no lint/typecheck/test is configured, or when nothing changed. Otherwise it fingerprints the changed files (path, mtime, size) plus the gate commands, and allows without running if that matches the last pass. It then runs lint → typecheck → test with `{files}` = changed, non-deleted files outside `.harness/`, and stops at the first failure with a `block` that names the stage, the exact command, why it failed (exit code or `timed out after Ns`), the last 8 KB of output, and "fix it, the gate will re-run (attempt n of max)". A full pass saves the fingerprint and resets the session's attempt count. After `stopGate.maxAttempts` consecutive blocks for one `session_id`, it allows, logs "gave up after N attempts" and resets the count, so the next turn gets a fresh budget. If git fails, it logs and allows.
+- State: `<root>/.harness/state/verify-gate.json` (`{ fingerprint, attempts: { [sessionId]: n } }`), read and written only by `verify-gate`. Writes are atomic (temp file + rename), a corrupt file is treated as empty, and at most 20 sessions are kept. Creating `.harness/state/` also writes a `.gitignore` containing `*`.
+- `format-on-edit` (PostToolUse): Edit/Write/MultiEdit on an existing file inside the root runs `runStage("format", config, [file], { timeoutMs: 30000 })`. Success is silent; failure returns context with a 1.5 KB tail. It never blocks.
+- `session-context` (SessionStart): branch; `Dirty files (n)` with the first 10 (deleted ones marked) or "Working tree: clean"; the verify commands with the `{files}` note and a reminder about the Stop gate; the last 40 lines of `.harness/progress.md` (capped at 1.2 KB); and a `/harness:harness-init` hint when `.harness/config.json` is missing. Git lines are dropped when git fails. The whole block is capped at 2 KB.
+- Config: `stopGate.timeoutSec` (integer ≥ 1, default 300) in `lib/config.mjs` and its typedef. `hooks.json`: Stop `timeout` 900, PostToolUse `timeout` 60.
+- Docs: the `{files}` convention in the README config example (with a related-test command) and in `templates/CLAUDE.md`; `timeoutSec` in `templates/config.json`.
+
+**Verified:** `npm test` gives 237/237 passing. New tests:
+- `test/verify.test.mjs`: placeholder tables; quoting of spaces, quotes, `$`, backticks and `;`, checked by a command that echoes its argv; skips; format appending; non-zero exit; CI and cwd; timeout kill; output tail.
+- `test/verify-gate.test.mjs`, against real temp git repos: clean tree; disabled; no commands; a failure reason with stage, command and tail; stage order; the 8 KB cap; a pass and then no re-run, proven with a counter file; re-runs after an edit, an add and a delete; a command change invalidating the fingerprint; the maxAttempts give-up and reset; `stop_hook_active` not bypassing; per-session counts; a pass resetting the count; `{files}` getting modified, added, renamed and untracked files but not deleted or `.harness/` ones; skipping on deletions only; `timeoutSec`; not a git repo; a corrupt state file.
+- `test/format-on-edit.test.mjs`, `test/session-context.test.mjs`, `timeoutSec` config cases, and an end-to-end `run.mjs` SessionStart context plus Stop block.
+
+**Changes from the sketch**
+- **Related tests only.** The sketch ran the full lint, typecheck and test on Stop. The user decided the gate runs only tests related to the changed files, built as one mechanism: the `{files}` placeholder in any `verify.*` command. Commands without it run as written (right for typecheck), and `format` appends the path. This settles the rationale's open question.
+- **`stopGate.timeoutSec`** (new config key, default 300) bounds each stage. A timed-out stage is a failure that says so.
+- **"Tree changed" means the working tree vs HEAD**, from `git status`, not "changed this session". It's stateless and also sees changes made through Bash.
+- **Fingerprint and state file.** So an unchanged tree doesn't re-run the checks on every stop, a pass stores a fingerprint in `.harness/state/verify-gate.json`. It's computed after the run, so files the checks touch don't force another run, and it includes the gate commands, so editing them re-runs the gate.
+- **Loop guard.** The sketch said "respect `stop_hook_active`". The bound is the per-session attempt counter instead, and `stop_hook_active` alone doesn't bypass the gate. Giving up resets the counter, so the next turn is gated again.
+- `.harness/` files aren't passed to `{files}`, because they're never lint or test input. They still count as changes for the fingerprint.
+- Two small private helpers, `lib/verify.mjs` and `lib/git.mjs`, so format-on-edit, verify-gate and session-context share one way to run commands and one `git status` parser.
+
+**Review round 1 (PR #3)**
+- **Loop guard fails open when state can't be saved (blocking).** Before, a read-only `.harness/` or a directory at `.harness/state/verify-gate.json` kept the attempt count at 0, so the gate blocked forever. Now `writeState` reports failure, and a failing stage whose count can't be saved allows (logged). As a backstop, a continuation (`stop_hook_active: true`) with an unreadable state file allows without running. Tests cover both repros (the chmod case is skipped as root) and the backstop.
+- **Leading `-` in file names (blocking).** `-rf`, `--x=1` or `--config=evil.js` reached `eslint {files}` as options. `pathArg` in `lib/verify.mjs` prefixes such paths with `./` before quoting, for both `{files}` and the format append. Table rows cover it alone and combined with spaces, quotes and `$(…)`, and an argv-echo run checks them end to end.
+- **Overall deadline.** One Stop gets 840 s in total (below the 900 s hook timeout in `hooks.json`). Each stage runs with `min(stopGate.timeoutSec, remaining)`, and once the deadline passes the gate allows and logs. `runStage` also catches SIGTERM, SIGINT and SIGHUP while a stage runs, kills the stage's process group, and re-raises the signal. A test SIGTERMs a parent process running a stage with a background grandchild and checks that both are gone (and fails if the handler is removed).
+- **`.gitignore` whenever missing.** `.harness/state/.gitignore` is written whenever it's missing, not only when the directory is created.
+- **Defaults in `lib/config.mjs` only.** The duplicate `?? 300` in `lib/verify.mjs` is gone. The format limit is a new validated top-level key, `formatTimeoutSec` (integer ≥ 1, default 30), in the typedef, `templates/config.json` and the README. `runStage` defaults to `formatTimeoutSec` for `format` and `stopGate.timeoutSec` for the other stages.
+- `npm test`: 246/246 passing.
+
+**Known gaps**
+- "Changed files" includes edits the user made before the session, and anything else uncommitted, so the gate can block on someone else's work in progress.
+- A change committed mid-turn no longer counts as changed, so the gate doesn't check it.
+- The fingerprint uses mtime and size, so a change that keeps both (rare, e.g. a tool that restores mtimes) isn't noticed, and a `touch` without a content change triggers a re-run.
+- Related-test quality depends on the tool. `vitest related` and `jest --findRelatedTests` follow imports; other stacks need approximations (step 4). `{files}` lists every changed file, including docs and config, so commands must tolerate non-source paths.
+- The overall 840 s deadline keeps the gate inside the 900 s hook timeout, and SIGTERM/SIGINT/SIGHUP to the hook kill the running stage's process group. A SIGKILL to the hook can't be caught, though, so a stage would then outlive it.
+- If the state file can't be written, the gate never blocks: it fails open rather than risk an unbounded loop. The checks still run and the failure is logged to stderr.
+- Quoting is POSIX-shell quoting. On Windows (`cmd.exe`), file names with spaces or quotes may not survive.

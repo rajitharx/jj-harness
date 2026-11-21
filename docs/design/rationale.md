@@ -21,6 +21,7 @@ After that the user does nothing different. The hooks run on their own. Skills a
 - **Deep runtime**: `runHook(event, input) → HookResult` is the whole public surface. Policies return a small `Verdict` union, and merging it into Claude Code's exit codes and JSON happens in one place, so the wire protocol doesn't leak into the policies.
 - **Fail open**: if a policy crashes, it logs to stderr and allows. A broken harness must never brick a session. Guards are the exception: they are unit-tested and nearly pure. The only I/O is `guard-bash` reading `.git/HEAD` to find the current branch, and it allows the command if that read fails.
 - **Zero dependencies**: Node ≥22 stdlib only, so installing the plugin never runs `npm install`.
+- **Related tests only**: the Stop gate checks what changed, not the whole suite. Any `verify.*` command may contain `{files}`, which `lib/verify.mjs` replaces with the shell-quoted changed files (working tree vs HEAD); with no changed files, that stage is skipped. Commands without `{files}`, such as typecheck, run as written, and `format` gets the edited path appended. `harness-init` picks the stack's related-test command (`jest --findRelatedTests {files}`, `vitest related --run {files}`, and so on).
 
 ## Synthesis decision
 
@@ -44,10 +45,10 @@ B is the base. From A I kept generating `CLAUDE.md` into the project, because pr
 
 ## Open questions and risks
 
-- Should the Stop gate run the full test suite, or only tests related to changed files?
+- ~~Should the Stop gate run the full test suite, or only tests related to changed files?~~ Decided in step 3: only related files, through `{files}`.
 - Should guard-bash also confirm `git push` to non-protected branches, or only deny force-push to main?
 - Do we also want Cursor/Codex adapters for the skills, or is Claude Code the only target?
 
 ## Next implementation step
 
-Guardrails done (see `docs/ROADMAP.md` step 2). Next: step 3, the quality loop (`format-on-edit`, `verify-gate`, `session-context`).
+Quality loop done (see `docs/ROADMAP.md` step 3). Next: step 4, the workflow skills. Start with `harness-init`, which must detect the stack and write `{files}`-based related-test commands into `.harness/config.json`.

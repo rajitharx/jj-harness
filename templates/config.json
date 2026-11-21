@@ -2,5 +2,6 @@
   "verify": { "format": "", "lint": "", "typecheck": "", "test": "" },
   "protectedPaths": [],
   "blockedCommands": [],
-  "stopGate": { "enabled": true, "maxAttempts": 3 }
+  "stopGate": { "enabled": true, "maxAttempts": 3, "timeoutSec": 300 },
+  "formatTimeoutSec": 30
 }
