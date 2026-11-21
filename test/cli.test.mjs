@@ -209,7 +209,7 @@ test("verify: nothing changed skips {files} stages; --all checks every tracked f
   const none = await cli(root, "verify");
   assert.equal(none.code, 0);
   assert.match(none.stdout, /^skipped  test \(no matching changed files\)$/m);
-  assert.match(none.stdout, /^verify: nothing ran$/m);
+  assert.match(none.stdout, /^verify: nothing ran \(no check executed; not a pass\)$/m);
 
   writeFile(root, "src/untracked.ts", "u\n");
   rmSync(join(root, "src/new.ts"));
@@ -238,4 +238,122 @@ test("verify: exit 2 for an invalid config or outside a git repo; usage errors a
   const help = await cli(notGit, "--help");
   assert.equal(help.code, 0);
   assert.match(help.stdout, /init \[--write\] \[--force-config\]/);
+  assert.match(help.stdout, /verify \[--all \| --base <ref>\]/);
+  assert.match(help.stdout, /0 passed, or nothing ran \(no check executed, which is\s+not a pass\)/);
+});
+
+/**
+ * A repo on branch `feat` off `main`. `main` has src/a.ts, src/b.ts, src/gone.ts,
+ * src/keep.ts and README.md; `feat` commits an edit to src/b.ts, a new src/c.ts, a rename
+ * of src/a.ts to src/moved.ts, a deleted src/gone.ts and a README edit. The
+ * tree is clean.
+ */
+function branchRepo(verify) {
+  const root = makeRepo(
+    { verify },
+    {
+      "src/a.ts": "a\n",
+      "src/b.ts": "b\n",
+      "src/gone.ts": "g\n",
+      "src/keep.ts": "k\n",
+      "README.md": "r\n",
+      ".gitignore": "calls.log\n",
+    },
+  );
+  git(root, "branch", "-M", "main");
+  git(root, "checkout", "-q", "-b", "feat");
+  writeFile(root, "src/b.ts", "b2\n");
+  writeFile(root, "src/c.ts", "c\n");
+  git(root, "mv", "src/a.ts", "src/moved.ts");
+  git(root, "rm", "-q", "src/gone.ts");
+  writeFile(root, "README.md", "r2\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "feat");
+  return root;
+}
+
+test("verify --base: a committed branch with a clean tree is checked, and a failure exits 1", async () => {
+  const root = branchRepo({ test: { run: "echo related-test-broke >&2; exit 1", files: ["**/*.ts"] } });
+
+  const plain = await cli(root, "verify");
+  assert.equal(plain.code, 0, "without --base, nothing differs from HEAD");
+  assert.match(plain.stdout, /^verify: 0 changed files/m);
+  assert.match(plain.stdout, /^verify: nothing ran \(no check executed; not a pass\)$/m);
+
+  for (const args of [["--base", "main"], ["--base=main"]]) {
+    const r = await cli(root, "verify", ...args);
+    assert.equal(r.code, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /^verify: 4 changed files \(main\.\.\.HEAD plus the working tree\)/m);
+    assert.match(r.stdout, /^FAILED   test: .*\(exit 1\)$/m);
+    assert.match(r.stdout, /^related-test-broke$/m);
+    assert.match(r.stdout, /^verify: failed \(test\)$/m);
+  }
+});
+
+test("verify --base: {files} gets only the branch's files plus working-tree edits, never deleted ones", async () => {
+  const root = branchRepo({ test: { run: `${RECORD} {files}`, files: ["**/*.ts"] } });
+  // Commits on main after the branch point are not the branch's changes.
+  git(root, "checkout", "-q", "main");
+  writeFile(root, "src/main-only.ts", "m\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "main moves on");
+  git(root, "checkout", "-q", "feat");
+
+  const branch = await cli(root, "verify", "--base", "main");
+  assert.equal(branch.code, 0, branch.stdout + branch.stderr);
+  assert.deepEqual(calls(root), [["src/b.ts", "src/c.ts", "src/moved.ts"]], "renamed to the new path, deleted and main-only left out");
+
+  // Union with the working tree: an edit to a file the branch didn't touch, a
+  // new untracked file, and deleting (uncommitted) a file the branch added.
+  rmSync(join(root, "calls.log"));
+  writeFile(root, "src/keep.ts", "k2\n");
+  writeFile(root, "src/untracked.ts", "u\n");
+  rmSync(join(root, "src/c.ts"));
+  const union = await cli(root, "verify", "--base", "main");
+  assert.equal(union.code, 0, union.stdout + union.stderr);
+  assert.deepEqual(calls(root), [["src/b.ts", "src/keep.ts", "src/moved.ts", "src/untracked.ts"]]);
+});
+
+test("verify --base: a project root in a repo subdirectory sees only its own files, relative to it", async () => {
+  const top = makeRepo(undefined, {
+    "app/.harness/config.json": JSON.stringify({ verify: { test: { run: `${RECORD} {files}`, files: ["**/*.ts"] } } }),
+    "app/src/a.ts": "a\n",
+    "other/x.ts": "x\n",
+    ".gitignore": "calls.log\n",
+  });
+  git(top, "branch", "-M", "main");
+  git(top, "checkout", "-q", "-b", "feat");
+  writeFile(top, "app/src/a.ts", "a2\n");
+  writeFile(top, "other/x.ts", "x2\n");
+  git(top, "add", "-A");
+  git(top, "commit", "-q", "-m", "feat");
+  const r = await cli(join(top, "app"), "verify", "--base", "main");
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.deepEqual(calls(join(top, "app")), [["src/a.ts"]]);
+});
+
+test("verify --base: a bad ref, a missing value or --all with --base exits 2 with a clear message", async () => {
+  const root = branchRepo({ test: "exit 0" });
+  const cases = [
+    [["--base", "no-such-branch"], /verify --base: unknown base ref "no-such-branch": no such commit/],
+    [["--base", "-rf"], /verify --base: invalid base ref "-rf"/],
+    [["--base"], /verify: --base needs a value/],
+    [["--base="], /verify: --base needs a value/],
+    [["--base", "main", "--base", "main"], /verify: --base given twice/],
+    [["--all", "--base", "main"], /--all and --base can't be combined/],
+  ];
+  for (const [args, re] of cases) {
+    const r = await cli(root, "verify", ...args);
+    assert.equal(r.code, 2, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, re, args.join(" "));
+    assert.doesNotMatch(r.stdout, /^verify: (passed|nothing ran)/m);
+  }
+
+  // A ref with no common ancestor (an orphan branch).
+  git(root, "checkout", "-q", "--orphan", "lonely");
+  git(root, "commit", "-q", "-m", "orphan");
+  git(root, "checkout", "-q", "feat");
+  const orphan = await cli(root, "verify", "--base", "lonely");
+  assert.equal(orphan.code, 2);
+  assert.match(orphan.stderr, /no common ancestor/);
 });

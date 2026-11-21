@@ -29,7 +29,7 @@ Then, in any project:
 - `CLAUDE.md` and `AGENTS.md`. If they already exist, only a block between `<!-- harness:start -->` and `<!-- harness:end -->` is inserted or updated. Your text is left as is.
 - `.harness/progress.md`, for the `handoff` skill's notes.
 
-Commit those four files. Under the hood the skill runs the plugin's CLI, which you can also run yourself: `node <plugin>/bin/harness.mjs init` (a dry run that prints JSON), `init --write [--force-config]`, and `verify [--all]`.
+Commit those four files. Under the hood the skill runs the plugin's CLI, which you can also run yourself: `node <plugin>/bin/harness.mjs init` (a dry run that prints JSON), `init --write [--force-config]`, and `verify [--all | --base <ref>]`. Plain `verify` checks the files that differ from `HEAD`. `--base main` also checks the files the branch changed since `main` (`git diff main...HEAD`), so it works on committed branches. `verify` exits 0 on `verify: passed` and also on `verify: nothing ran`, which means no check executed and is not a pass. It exits 1 when a check fails, and 2 on a usage, config or git error, including an unknown ref.
 
 A config looks like this:
 

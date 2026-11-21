@@ -39,11 +39,11 @@ If you get neither a diff nor a base ref, find the base with `git symbolic-ref -
    - Reproduce it where you can: run the relevant test, or write a small script in a temp dir that calls the changed code and shows the failure.
    - Mark it **CONFIRMED** if you reproduced it, or **PLAUSIBLE** if you reasoned it from the code without reproducing it.
    - Drop it if the code or a test shows it can't happen, or if you can't support it.
-5. **Run the checks** for the affected files:
-   - if you were given the plugin path: `node "<plugin>/bin/harness.mjs" verify` (it runs the project's lint, typecheck and related tests on the changed files);
+5. **Run the checks** for the files in the change:
+   - if you were given the plugin path: `node "<plugin>/bin/harness.mjs" verify --base <base>`, with the same base ref as the diff. It runs the project's lint, typecheck and related tests on the files changed in `<base>...HEAD` plus uncommitted work. Without `--base` it sees only uncommitted work, so on a committed branch it checks nothing. Use plain `verify` only when the change under review is the staged or uncommitted diff;
    - otherwise, the project's test command for the affected files only (look in `.harness/config.json`, `CLAUDE.md` or the manifest). Don't run the full suite unless asked.
 
-   Quote the result. A failing check is a finding.
+   Quote the result. Exit 1 (`verify: failed (…)`) is a finding. Exit 2 is a usage, config or git error (for example an unknown base ref): fix the command or report it. `verify: nothing ran` exits 0 but means **no checks executed**. Report it as "no checks executed", never as passing.
 
 No style nits, naming opinions or refactor suggestions unless the project rules ask for them, or they hide a bug.
 
@@ -65,7 +65,7 @@ Keep it concise and concrete. Use this shape:
 - <area or risk you checked and found OK, with how you checked it>
 
 ## Checks run
-- `<command>`: <passed / failed, with the relevant output>
+- `<command>`: <passed / failed / no checks executed, with the relevant output>
 
 Verdict: approve | request changes
 ```

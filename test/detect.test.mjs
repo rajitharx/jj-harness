@@ -216,6 +216,13 @@ const RUST_EDITIONS = [
   ["no edition", { "Cargo.toml": '[package]\nname = "x"\n' }, ".", "2021", /default; Cargo.toml sets no edition/],
   ["[package] edition", { "Cargo.toml": '[package]\nname = "x"\nedition = "2018"\n' }, ".", "2018", /\(from Cargo\.toml\)/],
   [
+    "a comment with no space before # after the value",
+    { "Cargo.toml": '[package]\nname = "a#b" # c\nedition = "2018"#old\n' },
+    ".",
+    "2018",
+    /\(from Cargo\.toml\)/,
+  ],
+  [
     "[package] edition wins over [workspace.package] in the same file",
     { "Cargo.toml": '[workspace.package]\nedition = "2024"\n\n[package]\nname = "x"\nedition = "2018"\n' },
     ".",

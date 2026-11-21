@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // The harness CLI: the small surface the skills call.
 //   init [--write] [--force-config]   propose (or write) config, CLAUDE.md, AGENTS.md, progress.md
-//   verify [--all]                    run lint, typecheck and test on the changed files
-// Exit codes: 0 ok, 1 checks failed or init refused, 2 usage, config or git error.
+//   verify [--all | --base <ref>]     run lint, typecheck and test on the changed files
+// Exit codes: 0 ok (for verify, also "nothing ran", which it prints and is not a
+// pass), 1 checks failed or init refused, 2 usage, config or git error
+// (including an unknown --base ref).
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_PATH, ConfigError, PROGRESS_PATH, defaultConfig, loadConfig, validateConfig } from "../lib/config.mjs";
 import { detectProject } from "../lib/detect.mjs";
-import { changedFiles, trackedFiles } from "../lib/git.mjs";
+import { BaseRefError, changedFiles, trackedFiles } from "../lib/git.mjs";
 import { CHECK_STAGES, runStage, stageFiles, tail } from "../lib/verify.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -16,17 +18,27 @@ const MARK_START = "<!-- harness:start -->";
 const MARK_END = "<!-- harness:end -->";
 const OUTPUT_TAIL = 4000;
 
-/** Subcommands: their flags and implementation. skills.test.mjs reads the names from here. */
+/**
+ * Subcommands: their boolean flags, the options that take a value
+ * (`--base <ref>` or `--base=<ref>`), and the implementation.
+ * skills.test.mjs reads the names and flags from here.
+ */
 export const COMMANDS = {
-  init: { flags: ["--write", "--force-config"], run: init },
-  verify: { flags: ["--all"], run: verify },
+  init: { flags: ["--write", "--force-config"], options: [], run: init },
+  verify: { flags: ["--all"], options: ["--base"], run: verify },
 };
 export const SUBCOMMANDS = Object.keys(COMMANDS);
 
 const USAGE = `usage: harness.mjs <command> [flags]
   init [--write] [--force-config]  detect the stack and propose .harness/config.json (dry run);
                                    --write creates it plus CLAUDE.md, AGENTS.md and .harness/progress.md
-  verify [--all]                   run lint, typecheck and test on the changed files (--all: every tracked file)`;
+  verify [--all | --base <ref>]    run lint, typecheck and test on the files that differ from HEAD;
+                                   --base <ref>: plus the files the branch changed (git diff <ref>...HEAD),
+                                   for checking committed work; --all: every tracked file
+
+verify prints one line per stage, then "verify: passed", "verify: failed (<stages>)" or
+"verify: nothing ran". Exit codes: 0 passed, or nothing ran (no check executed, which is
+not a pass); 1 a check failed; 2 a usage, config or git error, or an unknown --base ref.`;
 
 /**
  * Run the CLI. Returns the exit code instead of exiting, so tests can call it.
@@ -45,14 +57,28 @@ export async function main(argv, { cwd = process.cwd(), out = (s) => process.std
     err(`${name ? `unknown command: ${name}\n` : ""}${USAGE}\n`);
     return 2;
   }
-  const unknown = rest.filter((a) => !command.flags.includes(a));
-  if (unknown.length) {
-    err(`${name}: unknown argument ${unknown.join(" ")}\n${USAGE}\n`);
-    return 2;
+  const flags = new Set();
+  const options = {};
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i];
+    const eq = arg.indexOf("=");
+    const opt = eq > 0 ? arg.slice(0, eq) : arg;
+    if (command.flags.includes(arg)) {
+      flags.add(arg);
+    } else if (command.options.includes(opt)) {
+      const value = eq > 0 ? arg.slice(eq + 1) : rest[++i];
+      if (!value || Object.hasOwn(options, opt)) {
+        err(`${name}: ${opt} ${value ? "given twice" : "needs a value"}\n${USAGE}\n`);
+        return 2;
+      }
+      options[opt] = value;
+    } else {
+      err(`${name}: unknown argument ${arg}\n${USAGE}\n`);
+      return 2;
+    }
   }
-  const flags = new Set(rest);
   try {
-    return await command.run(flags, { cwd, out, err });
+    return await command.run(flags, { cwd, out, err, options });
   } catch (e) {
     err(`harness ${name}: ${e?.message ?? e}\n`);
     return 2;
@@ -198,7 +224,13 @@ function projectRoot(cwd) {
 
 // ---------------------------------------------------------------- verify
 
-async function verify(flags, { cwd, out, err }) {
+async function verify(flags, { cwd, out, err, options = {} }) {
+  const all = flags.has("--all");
+  const base = options["--base"];
+  if (all && base !== undefined) {
+    err(`verify: --all and --base can't be combined\n${USAGE}\n`);
+    return 2;
+  }
   let config;
   try {
     config = loadConfig(cwd);
@@ -207,10 +239,9 @@ async function verify(flags, { cwd, out, err }) {
     err(`${e.message}\n`);
     return 2;
   }
-  const all = flags.has("--all");
   let files;
   try {
-    const changed = changedFiles(config.root);
+    const changed = changedFiles(config.root, base);
     if (all) {
       const tracked = trackedFiles(config.root).map((path) => ({ path, deleted: !existsSync(join(config.root, path)) }));
       files = [...new Set(stageFiles([...tracked, ...changed]))].sort();
@@ -218,11 +249,20 @@ async function verify(flags, { cwd, out, err }) {
       files = stageFiles(changed);
     }
   } catch (e) {
+    if (e instanceof BaseRefError) {
+      err(`verify --base: ${e.message}\n`);
+      return 2;
+    }
     err(`could not list files with git in ${config.root}: ${String(e?.message ?? e).split("\n")[0]}\n`);
     return 2;
   }
 
-  out(`verify: ${files.length} ${all ? "files (--all: every tracked file)" : "changed files"} in ${config.root}\n`);
+  const scope = all
+    ? "files (--all: every tracked file)"
+    : base !== undefined
+      ? `changed files (${base}...HEAD plus the working tree)`
+      : "changed files";
+  out(`verify: ${files.length} ${scope} in ${config.root}\n`);
   const failed = [];
   let ran = 0;
   for (const stage of CHECK_STAGES) {
@@ -240,7 +280,7 @@ async function verify(flags, { cwd, out, err }) {
       out(`FAILED   ${stage}: ${r.command} (${why})\n${tail(r.output, OUTPUT_TAIL) || "(no output)"}\n`);
     }
   }
-  out(failed.length ? `verify: failed (${failed.join(", ")})\n` : ran ? "verify: passed\n" : "verify: nothing ran\n");
+  out(failed.length ? `verify: failed (${failed.join(", ")})\n` : ran ? "verify: passed\n" : "verify: nothing ran (no check executed; not a pass)\n");
   return failed.length ? 1 : 0;
 }
 
