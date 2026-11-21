@@ -14,6 +14,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 5 | Agents | ✅ |
 | 6 | Dogfood and release | ✅ |
 | 0.1.1 | Post-0.1.0: doc fixes and gate notices | ✅ |
+| 0.2.0 | Monorepo and .NET support in `harness-init` | ✅ |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -88,6 +89,15 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - [x] Release 0.1.1: `plugin.json` and `package.json` bumped, `CHANGELOG.md` entry with compare links on the `harness--v<version>` tags
 
 ---
+
+## 0.2.0: Monorepo and .NET support ✅
+
+- [x] Detect stacks in the root's immediate subdirectories and in `apps/*`, `packages/*`, `services/*`, alongside or instead of the root (stdlib only)
+- [x] .NET detection (`*.sln`, `*.slnx`, `*.csproj`) with `dotnet test`, flagged in `notes` as a full-suite command for the user to confirm
+- [x] Per-package commands: `cwd` on a verify entry and arrays of entries per stage (schema extension, rationale recorded in `docs/design/rationale.md`); `lib/config.mjs` stays the only module that knows the schema; README config table and defaults block in sync
+- [x] `harness-init` skill: reports the detected packages, asks which the Stop gate should check (`init --packages`), checks each command once
+- [x] Tests: monorepo fixture (two npm apps and a .NET project), single-stack (no regression) and empty repo, plus `cwd` runtime, gate, session-context and CLI cases
+- [x] README quickstart and `init --write` output mention `/reload-plugins` for a plugin installed mid-session
 
 ## Completion log
 
@@ -451,3 +461,32 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - The gate's notices aren't shown to the model, so the agent's own summary can still say it didn't run the checks. The user now sees the line right after it.
 - The hooks reference caps `additionalContext` and `systemMessage` at 10,000 characters; `runHook` still caps context at 16 KB (follow-up in the rationale).
 - The live check covers headless `stream-json`. How the interactive TUI renders a Stop `systemMessage` wasn't observed.
+
+### 0.2.0: Monorepo and .NET support (2026-11-21)
+
+**Shipped**
+- **Package detection** (`lib/detect.mjs`): `detectProject(root, { only })` analyzes the root and every package directory the same way. Packages are the root's immediate subdirectories and the children of `apps/`, `packages/` and `services/` that hold a manifest; dot directories, symlinks, `node_modules`, `bin`, `obj`, `dist`, `build`, `out`, `target`, `vendor`, `coverage`, `venv` and `__pycache__` are skipped, and more than 40 packages are capped with a note. The result gained `packages: [{ path, stacks }]` (the root is `.`). A repo with one stack at the root gets the same `stacks`, `verify` and `notes` as before. A package inherits its lockfile and eslint/prettier/biome configs from the root, which is how a pnpm workspace's apps get `pnpm exec`.
+- **.NET**: `*.sln`, `*.slnx` or `*.csproj` yields `dotnet test` filtered to `.cs`, `.razor`, `.cshtml`, `.csproj`, `.props` and `.targets`. When a directory has more than one solution or project (which fails with MSB1011) the command names one. Notes say that it is a full-suite command to confirm with the user, that `dotnet build` and `dotnet format --verify-no-changes` are optional and left out, and, when `global.json` selects the Microsoft.Testing.Platform runner, that `dotnet test` then takes `--solution`/`--project`.
+- **Schema** (`lib/config.mjs`): a verify entry may have `cwd` and a stage may be an array of entries. `cwd` is validated (relative, no `..`, no backslash or drive) and normalized (`./apps//web/` becomes `apps/web`, `.` means none); an array of one is unwrapped and empty commands are dropped, so single-stack configs read exactly as before. `stageEntries` is the one accessor.
+- **Runtime** (`lib/verify.mjs`): `planStage` scopes the changed files to `cwd`, makes them relative to it, then applies the filter and the placeholders; nothing under `cwd` skips the entry, even a whole-project command. `runStage` runs the entries in order in their directories, stops at the first failure, and gives the stage one time limit. Results carry `cwd` and `commands`, and `describeRun` prints `(in apps/web) npx …` in the gate's block message, format-on-edit's context and `verify`'s output. `session-context` and the `CLAUDE.md` block list every entry with its directory.
+- **CLI**: `init --packages a,b` keeps only those packages (the root is `.`); the dry-run JSON has `packages`; `init --write` ends with a `/reload-plugins` reminder.
+- **Skill and README**: `harness-init` reports the packages, asks which the gate should check, runs each command once in its own directory and asks about the .NET full-suite note. The README quickstart explains the `Unknown skill: harness:harness-init` error after a mid-session install.
+
+**Verified**
+- `npm test`: 409/409 passing (367 before), in about 11 s.
+  - `test/monorepo.test.mjs` (new): a detection table with the OnLah layout (two npm apps and a .NET project, no root manifest), a single-stack repo, an empty repo, `services/` and `packages/` children, deeper directories ignored, skipped and symlinked directories, root lockfile inheritance, same-stack root and package, and five .NET layouts (solution, `.slnx`, lone project, sln plus project, `global.json` runner); `only` and the 40-package cap; a `planStage` table for `cwd` (relative files, filters, `{dirs}`, whole-project commands, skips); `runStage` in each directory, in order, skipping, first failure, one time limit across entries, root and package entries mixed; the verify gate blocking with the package named; session context; and the CLI (`init`, `--packages`, `--write`, CLAUDE.md, empty repo, `verify`).
+  - `test/config.test.mjs`: arrays, `cwd` and `stageEntries` (nine new invalid configs, five normalization cases). The two cases that said an array and `cwd` were invalid now say the opposite.
+- The README defaults block is unchanged (`verify` defaults to `{}`), and `test/release.test.mjs` still checks it against `lib/config.mjs`.
+
+**Changes from the sketch**
+- There was no sketch for this. The decision between a generated shell loop and a schema extension is in the rationale ("Monorepos (0.2.0)"): schema, because splitting `{files}` per package in `sh` is untestable generated text.
+- `files` globs under a `cwd` match paths relative to the package, not to the repo root. The task text said "scoped to that package's path"; the `cwd` does the scoping, and the globs stay the same `**/*.ts` as a single-stack repo so detection reuses them.
+- `init --packages` was added so that "ask which packages the gate should check" can be answered by re-running detection, not by hand-editing arrays.
+- The reload hint is in `init --write`'s output only. The CLI can't know whether the failing `Unknown skill` came first, so it is a plain reminder.
+
+**Known gaps**
+- Packages are found by directory layout, not from `pnpm-workspace.yaml`, `package.json` `workspaces`, Cargo or Go workspaces, so a package three levels deep (`libs/js/foo`) is missed.
+- A root's tool dependencies (eslint in the root `devDependencies` only) aren't inherited by packages; only lockfiles and tool configs are.
+- A solution-style `tsconfig.json` (Vite's `references`) gets `tsc --noEmit`, which checks nothing there; `tsc -b` would. No note about it yet.
+- `dotnet test` was not run: no .NET SDK here, so the command's behaviour (MSB1011, the Microsoft.Testing.Platform flags) comes from documentation, not from a run. The first real use should be OnLah's backend.
+- Not dogfooded in a live Claude Code session or on OnLah itself; the fixtures only reproduce its layout.

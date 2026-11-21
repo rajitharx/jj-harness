@@ -8,10 +8,10 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG_PATH, ConfigError, PROGRESS_PATH, defaultConfig, loadConfig, validateConfig } from "../lib/config.mjs";
+import { CONFIG_PATH, ConfigError, PROGRESS_PATH, defaultConfig, loadConfig, stageEntries, validateConfig } from "../lib/config.mjs";
 import { detectProject } from "../lib/detect.mjs";
 import { BaseRefError, changedFiles, trackedFiles } from "../lib/git.mjs";
-import { CHECK_STAGES, runStage, stageFiles, tail } from "../lib/verify.mjs";
+import { CHECK_STAGES, describeRun, runStage, stageFiles, tail } from "../lib/verify.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MARK_START = "<!-- harness:start -->";
@@ -24,14 +24,16 @@ const OUTPUT_TAIL = 4000;
  * skills.test.mjs reads the names and flags from here.
  */
 export const COMMANDS = {
-  init: { flags: ["--write", "--force-config"], options: [], run: init },
+  init: { flags: ["--write", "--force-config"], options: ["--packages"], run: init },
   verify: { flags: ["--all"], options: ["--base"], run: verify },
 };
 export const SUBCOMMANDS = Object.keys(COMMANDS);
 
 const USAGE = `usage: harness.mjs <command> [flags]
-  init [--write] [--force-config]  detect the stack and propose .harness/config.json (dry run);
-                                   --write creates it plus CLAUDE.md, AGENTS.md and .harness/progress.md
+  init [--write] [--force-config] [--packages <paths>]
+                                   detect the stack and propose .harness/config.json (dry run);
+                                   --write creates it plus CLAUDE.md, AGENTS.md and .harness/progress.md;
+                                   --packages a,b: in a monorepo, only these packages (root-relative, "." = root)
   verify [--all | --base <ref>]    run lint, typecheck and test on the files that differ from HEAD;
                                    --base <ref>: plus the files the branch changed (git diff <ref>...HEAD),
                                    for checking committed work; --all: every tracked file
@@ -87,11 +89,12 @@ export async function main(argv, { cwd = process.cwd(), out = (s) => process.std
 
 // ---------------------------------------------------------------- init
 
-async function init(flags, { cwd, out, err }) {
+async function init(flags, { cwd, out, err, options = {} }) {
   const write = flags.has("--write");
   const force = flags.has("--force-config");
   const root = projectRoot(cwd);
-  const detection = detectProject(root);
+  const only = options["--packages"]?.split(",").map((p) => p.trim().replace(/^\.\/|\/$/g, "")).filter(Boolean);
+  const detection = detectProject(root, { only });
   const proposal = { ...readTemplateConfig(), verify: detection.verify };
   validateConfig(proposal, "proposed config");
 
@@ -100,7 +103,7 @@ async function init(flags, { cwd, out, err }) {
 
   if (!write) {
     const summary = changes.map(({ path, action, why }) => ({ path, action: dryAction(action), ...(why ? { why } : {}) }));
-    out(`${JSON.stringify({ root, stacks: detection.stacks, config: proposal, notes: detection.notes, changes: summary }, null, 2)}\n`);
+    out(`${JSON.stringify({ root, stacks: detection.stacks, packages: detection.packages, config: proposal, notes: detection.notes, changes: summary }, null, 2)}\n`);
     return 0;
   }
   if (refused.length) {
@@ -115,6 +118,7 @@ async function init(flags, { cwd, out, err }) {
   }
   for (const c of changes) out(`${c.action.padEnd(10)}${c.path}${c.why ? ` (${c.why})` : ""}\n`);
   if (detection.notes.length) out(`\nNotes:\n${detection.notes.map((n) => `- ${n}`).join("\n")}\n`);
+  out("\nInstalled the plugin in this session? Run /reload-plugins (or restart Claude Code) so its skills and hooks load; until then /harness:* says \"Unknown skill\".\n");
   return 0;
 }
 
@@ -196,16 +200,21 @@ function renderClaudeMd(root, verify) {
   const template = readFileSync(join(PLUGIN_ROOT, "templates", "CLAUDE.md"), "utf8");
   const values = { project_name: basename(root) };
   for (const stage of ["format", "lint", "typecheck", "test"]) values[`verify.${stage}`] = describeCommand(verify[stage]);
-  return template.replace(/\{\{([\w.]+)\}\}/g, (m, key) => values[key] ?? m);
+  // A stage with several commands is a list on the following lines: no trailing space after its label.
+  return template.replace(/\{\{([\w.]+)\}\}/g, (m, key) => values[key] ?? m).replace(/^(- [A-Za-z]+:) $/gm, "$1");
 }
 
 /** One command as markdown: `run`, its filter abbreviated, or "not configured". */
-function describeCommand(entry) {
-  if (!entry) return "not configured";
-  const { run, files } = typeof entry === "string" ? { run: entry } : entry;
-  if (!files) return `\`${run}\``;
-  const shown = files.slice(0, 3).map((g) => `\`${g}\``).join(", ");
-  return `\`${run}\` (only for ${shown}${files.length > 3 ? `, … ${files.length - 3} more` : ""})`;
+function describeCommand(stage) {
+  const entries = stageEntries(stage);
+  if (entries.length === 0) return "not configured";
+  const one = (entry) => {
+    const { run, files, cwd } = typeof entry === "string" ? { run: entry } : entry;
+    const shown = files?.slice(0, 3).map((g) => `\`${g}\``).join(", ");
+    const notes = [cwd && `in \`${cwd}\``, shown && `only for ${shown}${files.length > 3 ? `, … ${files.length - 3} more` : ""}`].filter(Boolean);
+    return `\`${run}\`${notes.length ? ` (${notes.join("; ")})` : ""}`;
+  };
+  return entries.length === 1 ? one(entries[0]) : entries.map((e) => `\n  - ${one(e)}`).join("");
 }
 
 function readTemplateConfig() {
@@ -273,11 +282,11 @@ async function verify(flags, { cwd, out, err, options = {} }) {
     const r = await runStage(stage, config, files);
     if (!r.skipped) ran++;
     if (r.skipped) out(`skipped  ${stage} (no matching ${all ? "" : "changed "}files)\n`);
-    else if (r.ok) out(`ok       ${stage}: ${r.command}\n`);
+    else if (r.ok) for (const c of r.commands ?? [r.command]) out(`ok       ${stage}: ${c}\n`);
     else {
       failed.push(stage);
       const why = r.timedOut ? `timed out after ${config.stopGate.timeoutSec}s` : r.exitCode === null ? "could not run" : `exit ${r.exitCode}`;
-      out(`FAILED   ${stage}: ${r.command} (${why})\n${tail(r.output, OUTPUT_TAIL) || "(no output)"}\n`);
+      out(`FAILED   ${stage}: ${describeRun(r)} (${why})\n${tail(r.output, OUTPUT_TAIL) || "(no output)"}\n`);
     }
   }
   out(failed.length ? `verify: failed (${failed.join(", ")})\n` : ran ? "verify: passed\n" : "verify: nothing ran (no check executed; not a pass)\n");

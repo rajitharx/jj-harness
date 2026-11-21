@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { ConfigError, loadConfig, validateConfig } from "../lib/config.mjs";
+import { ConfigError, loadConfig, stageEntries, validateConfig } from "../lib/config.mjs";
 import { makeProject } from "./helpers.mjs";
 
 test("defaults when no config file exists", () => {
@@ -78,10 +78,20 @@ for (const [name, config] of [
   ["non-object root", "[]"],
   ["unknown verify key", { verify: { build: "make" } }],
   ["non-string verify command", { verify: { test: 1 } }],
-  ["verify entry is an array", { verify: { test: ["npm test"] } }],
+  ["empty verify array", { verify: { test: [] } }],
+  ["verify array holding a number", { verify: { test: ["npm test", 1] } }],
+  ["verify array entry with unknown key", { verify: { test: [{ run: "x", dir: "a" }] } }],
+  ["nested verify array", { verify: { test: [["npm test"]] } }],
   ["verify entry without run", { verify: { test: { files: ["**/*.ts"] } } }],
   ["verify entry with non-string run", { verify: { test: { run: 1 } } }],
-  ["verify entry with unknown key", { verify: { test: { run: "x", cwd: "a" } } }],
+  ["verify entry with unknown key", { verify: { test: { run: "x", dir: "a" } } }],
+  ["cwd that is not a string", { verify: { test: { run: "x", cwd: 1 } } }],
+  ["absolute cwd", { verify: { test: { run: "x", cwd: "/etc" } } }],
+  ["windows drive cwd", { verify: { test: { run: "x", cwd: "C:/work" } } }],
+  ["cwd climbing out of the project", { verify: { test: { run: "x", cwd: "../other" } } }],
+  ["cwd climbing out in the middle", { verify: { test: { run: "x", cwd: "apps/../../other" } } }],
+  ["cwd with a backslash", { verify: { test: { run: "x", cwd: "apps\\web" } } }],
+  ["cwd on one entry of an array", { verify: { test: [{ run: "x", cwd: "ok" }, { run: "y", cwd: "../no" }] } }],
   ["verify files not an array", { verify: { lint: { run: "x {files}", files: "**/*.ts" } } }],
   ["verify files empty", { verify: { lint: { run: "x {files}", files: [] } } }],
   ["verify files with a non-string", { verify: { lint: { run: "x {files}", files: [1] } } }],
@@ -101,3 +111,30 @@ for (const [name, config] of [
     assert.throws(() => loadConfig(makeProject(config)), ConfigError);
   });
 }
+
+// [name, written verify stage, expected normalized stage]
+for (const [name, written, expected] of [
+  ["a cwd is cleaned", { run: "x", cwd: "./apps//web/" }, { run: "x", cwd: "apps/web" }],
+  ["a cwd of . means the root", { run: "x", cwd: "." }, { run: "x" }],
+  ["cwd and files together", { run: "x {files}", files: ["**/*.ts"], cwd: "web" }, { run: "x {files}", files: ["**/*.ts"], cwd: "web" }],
+  ["an array of one is unwrapped", [{ run: "x", cwd: "a" }], { run: "x", cwd: "a" }],
+  [
+    "an array keeps its order and drops empty commands",
+    ["root", { run: " ", cwd: "gone" }, { run: "y", cwd: "b" }, { run: "z", files: ["**/*.go"], cwd: "c" }],
+    [{ run: "root" }, { run: "y", cwd: "b" }, { run: "z", files: ["**/*.go"], cwd: "c" }],
+  ],
+]) {
+  test(`normalizes ${name}`, () => {
+    assert.deepEqual(loadConfig(makeProject({ verify: { test: written } })).verify.test, expected);
+  });
+}
+
+test("a stage whose commands are all empty is dropped", () => {
+  assert.deepEqual(loadConfig(makeProject({ verify: { test: ["", { run: "" }] } })).verify, {});
+});
+
+test("stageEntries gives one list for a single entry, an array or no stage", () => {
+  assert.deepEqual(stageEntries(undefined), []);
+  assert.deepEqual(stageEntries({ run: "x" }), [{ run: "x" }]);
+  assert.deepEqual(stageEntries([{ run: "x" }, { run: "y" }]), [{ run: "x" }, { run: "y" }]);
+});
