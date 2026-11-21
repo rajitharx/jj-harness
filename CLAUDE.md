@@ -4,7 +4,7 @@ A reusable Claude Code agent harness, shipped as a plugin. The design is in `doc
 
 ## Commands
 
-- Test: `npm test` (Node ≥20, stdlib only, no dependencies)
+- Test: `npm test` (Node ≥22, stdlib only, no dependencies)
 - Try the plugin locally: `claude --plugin-dir .`
 
 ## Code rules

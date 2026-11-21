@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Reusable Claude Code agent harness plugin.",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=22" },
   "scripts": { "test": "node --test \"test/**/*.test.mjs\"" },
   "license": "MIT"
 }

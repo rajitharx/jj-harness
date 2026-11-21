@@ -55,6 +55,7 @@ for (const [name, config] of [
   ["bad regex", { blockedCommands: ["("] }],
   ["bad maxAttempts", { stopGate: { maxAttempts: 0 } }],
   ["bad enabled", { stopGate: { enabled: "yes" } }],
+  ["unknown stopGate key", { stopGate: { maxAttempt: 2 } }],
 ]) {
   test(`rejects ${name}`, () => {
     assert.throws(() => loadConfig(makeProject(config)), ConfigError);
