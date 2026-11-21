@@ -93,7 +93,8 @@ async function init(flags, { cwd, out, err, options = {} }) {
   const write = flags.has("--write");
   const force = flags.has("--force-config");
   const root = projectRoot(cwd);
-  const only = options["--packages"]?.split(",").map((p) => p.trim().replace(/^\.\/|\/$/g, "")).filter(Boolean);
+  // "./apps/web/" is "apps/web", and "./" is the root, ".".
+  const only = options["--packages"]?.split(",").map((p) => p.trim().replace(/^\.\/|\/$/g, "") || ".");
   const detection = detectProject(root, { only });
   const proposal = { ...readTemplateConfig(), verify: detection.verify };
   validateConfig(proposal, "proposed config");

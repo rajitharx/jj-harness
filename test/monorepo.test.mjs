@@ -143,20 +143,53 @@ const CASES = [
     [/\[apps\/web\] Package manager: pnpm \(from its lockfile\)/],
   ],
   [
-    "a root and a package of the same stack are flagged",
-    { "package.json": { devDependencies: { vitest: "1" } }, "docs/package.json": { devDependencies: { vitest: "1" } } },
+    "a nested package of the root's stack is left out: the root's commands already see it",
+    { "package.json": { devDependencies: { vitest: "1", eslint: "9" } }, "eslint.config.js": "", "e2e/package.json": { devDependencies: { vitest: "1" } } },
     ["node"],
+    [[".", ["node"]]],
+    {
+      lint: [[".", "npx --no -- eslint --no-warn-ignored {files}"]],
+      test: [[".", "npx --no -- vitest related --run --passWithNoTests {files}"]],
+    },
+    [/Left out e2e: a node project like the root/, /pass `--packages` with the root/],
+  ],
+  [
+    "a Rust crate with a nested fuzz crate stays one crate",
+    { "Cargo.toml": '[package]\nname = "x"\nedition = "2021"\n', "fuzz/Cargo.toml": '[package]\nname = "x-fuzz"\n' },
+    ["rust"],
+    [[".", ["rust"]]],
+    {
+      format: [[".", "rustfmt --edition 2021"]],
+      lint: [[".", "cargo clippy"]],
+      typecheck: [[".", "cargo check"]],
+    },
+    [/Left out fuzz: a rust project like the root/],
+  ],
+  [
+    "a root solution with src/ and tests/ projects is one dotnet test, not three",
+    { "App.sln": "", "src/App.csproj": "", "tests/App.Tests.csproj": "" },
+    ["dotnet"],
+    [[".", ["dotnet"]]],
+    { test: [[".", "dotnet test"]] },
+    [/Left out src, tests: dotnet projects like the root, whose commands already see their files/],
+  ],
+  [
+    "a root of one stack keeps packages of other stacks",
+    { "go.mod": "module x\n", "web/package.json": { devDependencies: { vitest: "1" } }, "tools/go.mod": "module t\n" },
+    ["go", "node"],
     [
-      [".", ["node"]],
-      ["docs", ["node"]],
+      [".", ["go"]],
+      ["web", ["node"]],
     ],
     {
+      format: [[".", "gofmt -w"]],
+      typecheck: [[".", "go vet {dirs}"]],
       test: [
-        [".", "npx --no -- vitest related --run --passWithNoTests {files}"],
-        ["docs", "npx --no -- vitest related --run --passWithNoTests {files}"],
+        [".", "go test {dirs}"],
+        ["web", "npx --no -- vitest related --run --passWithNoTests {files}"],
       ],
     },
-    [/The root and docs are both node projects/],
+    [/Monorepo: found 2 packages: \. \(go\), web \(node\)/, /Left out tools: a go project like the root/],
   ],
   [
     ".NET: a solution",
@@ -246,11 +279,23 @@ test("detectProject: a package whose manifest yields no commands is still listed
   assert.ok(d.notes.some((n) => /\[tools\] No related-test command/.test(n)));
 });
 
+test("detectProject: --packages keeps a package the root covers, with the overlap note", () => {
+  const root = fixture({ "App.sln": "", "src/App.csproj": "", "tests/App.Tests.csproj": "" });
+  const d = detectProject(root, { only: [".", "src"] });
+  assert.deepEqual(shape(d.verify), { test: [[".", "dotnet test"], ["src", "dotnet test"]] });
+  assert.ok(d.notes.some((n) => /The root and src are both dotnet projects/.test(n)), JSON.stringify(d.notes));
+  // Only the package: no root entry at all.
+  assert.deepEqual(shape(detectProject(root, { only: ["tests"] }).verify), { test: [["tests", "dotnet test"]] });
+});
+
+const files2 = () => Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`services/p${String(i).padStart(2, "0")}/go.mod`, "module x\n"]));
+
 test("detectProject: more than 40 packages are capped, with a note", () => {
-  const files = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`pkgs/p${String(i).padStart(2, "0")}/go.mod`, "module x\n"]));
-  const d = detectProject(fixture(Object.fromEntries(Object.entries(files).map(([k, v]) => [k.replace("pkgs/", "services/"), v]))));
+  const d = detectProject(fixture(files2()));
   assert.equal(d.packages.length, 40);
   assert.ok(d.notes.some((n) => /Found 45 packages; only the first 40/.test(n)));
+  // An explicit choice reaches a package past the cap.
+  assert.deepEqual(detectProject(fixture(files2()), { only: ["services/p44"] }).packages.map((p) => p.path), ["services/p44"]);
 });
 
 // ---------------------------------------------------------------- cwd in the runtime
@@ -438,6 +483,13 @@ test("init --packages keeps only the named packages; --write stores them and CLA
   // Re-running is a no-op.
   const again = await cli(root, "init", "--write", "--packages", "apps/web,apps/backend");
   assert.match(again.stdout, /unchanged {2,}\.harness\/config\.json|unchanged\s+CLAUDE\.md/);
+});
+
+test("init --packages ./ means the root", async () => {
+  const root = makeRepo(undefined, { "go.mod": "module x\n", "web/package.json": "{}" });
+  const out = JSON.parse((await cli(root, "init", "--packages", "./")).stdout);
+  assert.deepEqual(out.packages.map((p) => p.path), ["."]);
+  assert.deepEqual(out.config.verify.test.cwd, undefined);
 });
 
 test("init in an empty repo still reports no stack and an empty verify config", async () => {

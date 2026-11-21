@@ -36,7 +36,8 @@ Replace `<skill base dir>` with that absolute path. Run it from the project root
    - no test command (Rust, or no runner found): ask which command to use. Prefer one that takes `{files}` or `{dirs}`. Never add a full-suite command silently: the Stop gate would run it on every stop.
    - .NET: `dotnet test` has no related-test mode, so it runs the whole solution's tests whenever a `.cs`, `.csproj`, `.razor` or props/targets file under the package changed. It is proposed, but only the user can say whether that is affordable; ask, and offer a `--filter` expression or dropping the stage. `dotnet build` and `dotnet format --verify-no-changes` are optional extras that the notes mention and the proposal leaves out.
    - pytest without pytest-testmon, or `node --test`: only changed test files run. Offer pytest-testmon for Python.
-   - several stacks: only the first stack's commands are proposed. Ask which stack the gate should check.
+   - several stacks in one directory (not in different packages): only the first stack's commands are proposed. Ask which stack the gate should check.
+   - "Left out …" notes: a package of the same stack as the root (a nested `e2e/` or `fuzz/` project, the projects of a root solution) isn't proposed, because the root's commands already see its files. Mention it; if the user wants it checked on its own, re-run with `--packages .,<path>`.
 
 4. **Write.** Run `init --write`. It:
    - creates `.harness/config.json`, or keeps an existing one (it says `kept`); pass `--force-config` only if the user agrees to replace it;
