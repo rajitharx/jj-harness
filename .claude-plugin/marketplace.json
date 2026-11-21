@@ -1,7 +1,13 @@
 {
   "name": "jj-harness",
   "owner": { "name": "rajitharx" },
+  "metadata": { "description": "Marketplace for the jj-harness Claude Code plugin." },
   "plugins": [
-    { "name": "harness", "source": "./", "description": "Reusable agent harness for any project." }
+    {
+      "name": "harness",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "Reusable agent harness for any project."
+    }
   ]
 }
