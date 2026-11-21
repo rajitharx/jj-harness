@@ -13,14 +13,13 @@ const plugin = json(".claude-plugin/plugin.json");
 const marketplace = json(".claude-plugin/marketplace.json");
 const pkg = json("package.json");
 
-test("plugin.json, the marketplace entry and package.json have the same version", () => {
+test("plugin.json is the one plugin version; package.json matches and the marketplace entry sets none", () => {
   const entry = marketplace.plugins.find((p) => p.name === plugin.name);
   assert.ok(entry, `marketplace.json lists the "${plugin.name}" plugin`);
   assert.match(plugin.version, /^\d+\.\d+\.\d+$/);
-  assert.deepEqual(
-    { plugin: plugin.version, marketplace: entry.version, package: pkg.version },
-    { plugin: plugin.version, marketplace: plugin.version, package: plugin.version },
-  );
+  assert.equal(pkg.version, plugin.version, "package.json version");
+  // The host-marketplace docs: don't set version in both places; plugin.json silently wins.
+  assert.equal(entry.version, undefined, "the marketplace entry must not set version");
 });
 
 test("CHANGELOG.md has a dated entry for the current version", () => {

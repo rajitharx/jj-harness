@@ -107,7 +107,7 @@ Claude Code fed it back as `Stop hook feedback: …` and the session continued (
 
 | Check | Before | After |
 | ----- | ------ | ----- |
-| marketplace.json | ⚠ no marketplace description | ✔ passes `--strict` (`metadata.description` added; the `harness` entry now has `version`) |
+| marketplace.json | ⚠ no marketplace description | ✔ passes `--strict` (`metadata.description` added; the version lives only in `plugin.json`, as the host-marketplace docs advise) |
 | plugin | ⚠ `CLAUDE.md` at the plugin root isn't loaded as context | ⚠ same, accepted: it's this repo's development guide |
 | hosts | "Hosts not declared: list what these parts reach under `network.hosts`" | cleared with `"network": { "hosts": [] }` (the plugin makes no network calls) |
 | plugin-directory checks (informational) | ⚠ `ICON_MISSING` | ⚠ same, accepted: the plugin isn't submitted to the public directory |

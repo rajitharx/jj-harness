@@ -21,7 +21,8 @@ First release. Steps 0 to 6 of the roadmap.
 ### Changed
 
 - `guard-paths` deny reasons now say that a project config can add protected paths but can't remove the built-in ones. In the dogfood run the agent told the user to remove `.env` from `protectedPaths`, which has no effect.
-- The marketplace manifest has a description and a `version` on the `harness` entry, and `plugin.json` declares that the plugin reaches no network hosts, which clears the `claude plugin validate` warnings for both manifests.
+- The marketplace manifest has a description, and `plugin.json` declares that the plugin reaches no network hosts, which clears the `claude plugin validate` warnings for both manifests. The version lives only in `plugin.json` (and `package.json`), not in the marketplace entry.
+- The README's private-repo install notes: they now cover git credentials (an SSH agent key, or `gh auth setup-git`), `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`, auto-update being off by default, and the manual update commands.
 
 [Unreleased]: https://github.com/rajitharx/jj-harness/compare/harness--v0.1.0...HEAD
 [0.1.0]: https://github.com/rajitharx/jj-harness/releases/tag/harness--v0.1.0

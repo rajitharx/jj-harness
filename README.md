@@ -19,7 +19,9 @@ From the marketplace:
 /plugin install harness@jj-harness
 ```
 
-The repository is private, so Claude Code clones it with your git credentials. Run `gh auth login` (and `gh auth setup-git`) or set up another git credential helper first. Background auto-updates need `GITHUB_TOKEN` (or `GH_TOKEN`) in the environment.
+The repository is private, so Claude Code clones it with your normal git credentials: an SSH key loaded in `ssh-agent`, or for HTTPS, `gh auth login` plus `gh auth setup-git` (or another credential helper that doesn't prompt). A `GITHUB_TOKEN` in the environment isn't enough on its own; it only works through a credential helper. On a machine with no GitHub SSH key, set `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` so installs and updates from `/plugin` clone over HTTPS instead of failing.
+
+Background auto-update is off by default for this marketplace. Turn it on under `/plugin` → **Marketplaces** → `jj-harness`. It uses the same credentials and never prompts. Without it, update by hand: `/plugin marketplace update jj-harness` in a session, or `claude plugin marketplace update jj-harness` and then `claude plugin update harness@jj-harness` in a shell (restart Claude Code to apply).
 
 Or run it straight from a checkout, without installing:
 
@@ -155,7 +157,7 @@ claude plugin validate . # official manifest, skill, agent and hook checks
 
 ### Release checklist
 
-1. Bump `version` in `.claude-plugin/plugin.json`, the `harness` entry in `.claude-plugin/marketplace.json` and `package.json` together. `test/release.test.mjs` fails if they differ or if `CHANGELOG.md` has no entry for the version.
+1. Bump `version` in `.claude-plugin/plugin.json` and `package.json` together. The marketplace entry deliberately has no `version` (Claude Code would silently prefer `plugin.json`'s). `test/release.test.mjs` fails if the two differ, if the marketplace entry sets one, or if `CHANGELOG.md` has no entry for the version. Users get only commits that bump the version.
 2. Add the `CHANGELOG.md` entry and tick the step in `docs/ROADMAP.md`.
 3. `npm test` and `claude plugin validate .` pass. CI runs both, on Node 22 and 24, on Ubuntu and macOS. The one expected warning is that the root `CLAUDE.md` isn't loaded as plugin context; it's this repo's development guide, not plugin content.
 4. Merge the release PR to `main`, then from an up-to-date `main`:
@@ -163,8 +165,8 @@ claude plugin validate . # official manifest, skill, agent and hook checks
    ```sh
    claude plugin tag . --dry-run   # prints the tag: harness--v<version>
    claude plugin tag . --push      # creates and pushes it
-   gh release create harness--v0.1.0 --title "harness v0.1.0" --notes-file <changelog excerpt>
+   gh release create harness--v0.1.0 --verify-tag --title "harness v0.1.0" --notes-file <changelog excerpt>
    ```
 
    `claude plugin tag` checks that `plugin.json` and the marketplace entry agree and that the tree is clean, then creates the `{name}--v{version}` tag (`harness--v0.1.0`).
-5. Users update with `claude plugin marketplace update jj-harness` and `claude plugin update harness@jj-harness`.
+5. Users with auto-update on get it in the background. Others run `/plugin marketplace update jj-harness`, or `claude plugin marketplace update jj-harness` and then `claude plugin update harness@jj-harness` (see [Quickstart](#quickstart)).

@@ -72,7 +72,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - [x] End-to-end hook test (`test/e2e.test.mjs`): one session through `hooks/run.mjs`, spawned exactly as `hooks/hooks.json` does, against a fixture git repo with stub verify commands
 - [x] Live dogfood with `claude -p --plugin-dir`: three headless sessions in a temp fixture (guard-paths deny, format-on-edit plus the Stop gate, `/harness:verify` plus a live Stop block). Report in `docs/dogfood-v0.1.0.md`
 - [x] Release readiness: `CHANGELOG.md`, versions agree across `plugin.json`, `marketplace.json` and `package.json` (`test/release.test.mjs`), CI on Node 22/24 × Ubuntu/macOS, README rewrite with a config reference checked against `lib/config.mjs`
-- [x] Release checklist (README, "Release checklist"): `claude plugin tag` creates `harness--v0.1.0`, then `gh release create`. Tagging and the release are done by the orchestrator after this PR merges, not in this branch
+- [x] Release checklist (README, "Release checklist"): `claude plugin tag` creates `harness--v0.1.0`, then `gh release create --verify-tag`. Tagging and the release are done by the orchestrator after this PR merges, not in this branch
 
 ---
 
@@ -349,7 +349,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 
 **Shipped**
 - **Official validation.** `claude plugin validate .` (Claude Code 2.1.330) reported three warnings and one plugin-directory warning, no errors. Fixed:
-  - marketplace: no description → `metadata.description` added. The `harness` entry also gained `"version": "0.1.0"`, which `claude plugin tag` checks against `plugin.json`. `.claude-plugin/marketplace.json` now passes `--strict`;
+  - marketplace: no description → `metadata.description` added. The entry has no `version` (review round 1 removed the one first added): the version lives in `plugin.json` only. `.claude-plugin/marketplace.json` now passes `--strict`;
   - "Hosts not declared" → `plugin.json` declares `"network": { "hosts": [] }`: nothing in the plugin makes network calls.
 
   Accepted: `CLAUDE.md at the plugin root is not loaded as project context` (it's this repo's development guide, which must stay at the root) and the informational `ICON_MISSING` directory check (the plugin isn't submitted to the public directory).
@@ -364,7 +364,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
   Plus: `maxAttempts` (block, block, give up with `gave up after 2 attempts` on stderr and nothing run, then a fresh budget on the next turn); `stop_hook_active` with a corrupt state file (allow without running, then a non-continuation Stop blocks and rewrites the counter); and a project with no config (init hint, `.git/config` still protected, gate allows).
 - **Live dogfood** (`docs/dogfood-v0.1.0.md`): three `claude -p --plugin-dir … --include-hook-events --output-format stream-json` sessions in a temp fixture repo with stub commands, $0.20 in total. All four hooks fired with the expected JSON; `/harness:verify` loaded and ran the CLI; the Stop gate blocked a real session, which then fixed the file.
 - **Dogfood fix**: `guard-paths` reasons now say that a project config can add protected paths but can't remove the built-in ones. In session (a) the model told the user to remove `.env` from `protectedPaths`, which does nothing. `test/guard-paths.test.mjs` asserts the sentence for every blocked path.
-- **Release files**: `CHANGELOG.md` (Keep a Changelog, `0.1.0 - 2026-11-21` covering steps 0–6). `test/release.test.mjs` (4 tests): the `plugin.json`, marketplace-entry and `package.json` versions are equal; the changelog has a dated entry for that version; the README's `<!-- config-defaults -->` JSON block deep-equals `defaultConfig()` from `lib/config.mjs`; and the README config table lists exactly the config keys (verify stage names read from `validateConfig`'s own error, so `lib/config.mjs` stays the only owner of the schema).
+- **Release files**: `CHANGELOG.md` (Keep a Changelog, `0.1.0 - 2026-11-21` covering steps 0–6). `test/release.test.mjs` (4 tests): the `plugin.json` and `package.json` versions are equal and the marketplace entry sets none; the changelog has a dated entry for that version; the README's `<!-- config-defaults -->` JSON block deep-equals `defaultConfig()` from `lib/config.mjs`; and the README config table lists exactly the config keys (verify stage names read from `validateConfig`'s own error, so `lib/config.mjs` stays the only owner of the schema).
 - **README rewrite**: what it is, quickstart (marketplace install with git credentials for the private repo, or `claude --plugin-dir`), `/harness:harness-init`, config reference table and defaults, related-tests-only behaviour, a hook table, skills and agents, known limitations (linking this log) and development plus a release checklist.
 
 **Verified**
@@ -375,9 +375,9 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - `claude plugin tag --help`: it creates a `{name}--v{version}` tag, so this release is `harness--v0.1.0`.
 
 **Changes from the sketch**
-- The sketch said "tag `v0.1.0`". `claude plugin tag` creates `harness--v0.1.0` (the `{name}--v{version}` format), and it validates `plugin.json` against the marketplace entry, so that's the tag the checklist uses. Tagging and `gh release create` are done by the orchestrator after the merge, not in this branch.
+- The sketch said "tag `v0.1.0`". `claude plugin tag` creates `harness--v0.1.0` (the `{name}--v{version}` format), and it validates `plugin.json` against any version the marketplace entry declares, so that's the tag the checklist uses. Tagging and `gh release create` are done by the orchestrator after the merge, not in this branch.
 - The sketch planned `/harness:review` with the real reviewer and a `harness:test-writer` run. They weren't run: the live run was capped at three sessions, and those went to the hooks and one skill. The agents are confirmed to load (`init.agents` lists both); their behaviour is the first follow-up.
-- `plugin.json` gained `network.hosts: []`, and `marketplace.json` gained `metadata.description` and a per-plugin `version`, all from the validator.
+- `plugin.json` gained `network.hosts: []`, and `marketplace.json` gained `metadata.description`, both from the validator. The task asked for `marketplace.json` to carry `0.1.0` too; the host-marketplace docs say not to set `version` in both places (plugin.json silently wins), so it doesn't (review round 1).
 
 **Known gaps**
 - Agents and five of the six skills are loaded but not exercised live (see above).
@@ -387,3 +387,15 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - `claude plugin validate .` can't run with `--strict` in CI while the dev `CLAUDE.md` sits at the plugin root. Moving the plugin into a subdirectory would fix it, but changes the marketplace `source` and every path.
 - The CI validator is pinned to 2.1.330 and needs a manual bump.
 - Windows remains untested; CI covers Ubuntu and macOS.
+
+**Review round 1 (PR #6)**
+- **Private-repo install notes (blocking).** The README claimed that background auto-updates need `GITHUB_TOKEN`/`GH_TOKEN` in the environment. The host-marketplace docs (code.claude.com/docs/en/plugins/host-marketplace) say a token alone doesn't authenticate the background check: it works only through a credential helper. They also say auto-update is off by default for a third-party marketplace. The Quickstart now says:
+  - clones use the user's git credentials: an SSH key in `ssh-agent`, or `gh auth login` plus `gh auth setup-git`;
+  - on machines without a GitHub SSH key, set `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` (documented on that page: `/plugin` installs and updates don't fall back to HTTPS without it);
+  - auto-update is off by default and is turned on under `/plugin` → Marketplaces;
+  - to update by hand, run `/plugin marketplace update jj-harness`, or `claude plugin marketplace update jj-harness` then `claude plugin update harness@jj-harness`.
+
+  The claim appeared only in the README. The CHANGELOG records the correction.
+- **No `version` on the marketplace entry.** The same page says "Don't set `version` in both `plugin.json` and the marketplace entry" (plugin.json wins without warning). The entry's `version` is removed. `claude plugin validate .` still passes, `--strict` on `marketplace.json` still passes, and `claude plugin tag --dry-run` still gives `harness--v0.1.0` from plugin.json. `test/release.test.mjs` now checks that `package.json` equals `plugin.json` and that the marketplace entry has no `version`.
+- The release checklist uses `gh release create … --verify-tag`, so a missing tag fails instead of being created from `main`.
+- `npm test`: 342/342 passing (342 before this round; one release test changed, none added).
