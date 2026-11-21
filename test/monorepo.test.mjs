@@ -154,6 +154,45 @@ const CASES = [
     [/Left out e2e: a node project like the root/, /pass `--packages` with the root/],
   ],
   [
+    "a bare workspace root covers nothing: every package gets its own commands",
+    {
+      "package.json": { private: true },
+      "packages/a/package.json": { devDependencies: { vitest: "1" } },
+      "apps/web/package.json": { devDependencies: { vitest: "1" } },
+    },
+    ["node"],
+    [
+      [".", ["node"]],
+      ["apps/web", ["node"]],
+      ["packages/a", ["node"]],
+    ],
+    {
+      test: [
+        ["apps/web", "npx --no -- vitest related --run --passWithNoTests {files}"],
+        ["packages/a", "npx --no -- vitest related --run --passWithNoTests {files}"],
+      ],
+    },
+    [/Monorepo: found 2 packages/],
+  ],
+  [
+    "a root with only lint does not cover a package's tests",
+    { "package.json": { devDependencies: { eslint: "9" } }, "eslint.config.js": "", "web/package.json": { devDependencies: { vitest: "1" } } },
+    ["node"],
+    [
+      [".", ["node"]],
+      ["web", ["node"]],
+    ],
+    {
+      // web inherits the root's eslint config, so it lints too; the overlap note says so.
+      lint: [
+        [".", "npx --no -- eslint --no-warn-ignored {files}"],
+        ["web", "npx --no -- eslint --no-warn-ignored {files}"],
+      ],
+      test: [["web", "npx --no -- vitest related --run --passWithNoTests {files}"]],
+    },
+    [/The root and web are both node projects/],
+  ],
+  [
     "a Rust crate with a nested fuzz crate stays one crate",
     { "Cargo.toml": '[package]\nname = "x"\nedition = "2021"\n', "fuzz/Cargo.toml": '[package]\nname = "x-fuzz"\n' },
     ["rust"],

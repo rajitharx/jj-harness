@@ -473,7 +473,7 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - **Skill and README**: `harness-init` reports the packages, asks which the gate should check, runs each command once in its own directory and asks about the .NET full-suite note. The README quickstart explains the `Unknown skill: harness:harness-init` error after a mid-session install.
 
 **Verified**
-- `npm test`: 414/414 passing (350 on `main`), in about 11 s.
+- `npm test`: 416/416 passing (350 on `main`), in about 11 s.
   - `test/monorepo.test.mjs` (new): a detection table with the OnLah layout (two npm apps and a .NET project, no root manifest), a single-stack repo, an empty repo, `services/` and `packages/` children, deeper directories ignored, skipped and symlinked directories, root lockfile inheritance, a nested package, Rust fuzz crate and root-solution projects left out as covered by the root, and five .NET layouts (solution, `.slnx`, lone project, sln plus project, `global.json` runner); `only` and the 40-package cap; a `planStage` table for `cwd` (relative files, filters, `{dirs}`, whole-project commands, skips); `runStage` in each directory, in order, skipping, first failure, one time limit across entries, root and package entries mixed; the verify gate blocking with the package named; session context; and the CLI (`init`, `--packages`, `--write`, CLAUDE.md, empty repo, `verify`).
   - `test/config.test.mjs`: arrays, `cwd` and `stageEntries` (nine new invalid configs, five normalization cases). The two cases that said an array and `cwd` were invalid now say the opposite.
 - The README defaults block is unchanged (`verify` defaults to `{}`), and `test/release.test.mjs` still checks it against `lib/config.mjs`.
@@ -493,4 +493,7 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 
 **Review round 1** (PR #8: should-fix findings)
 - A single-stack root with any nested manifest was proposed as a monorepo with doubled commands (root node plus `e2e/package.json` linted twice; Rust root plus `fuzz/Cargo.toml`; a root solution with `src/` and `tests/` gave three `dotnet test` entries). That contradicted "the same proposal as before". Packages of the root's stack are now left out by default with a note, and explicit `--packages` still includes them (with a "may run twice" note). Tests: the node-plus-e2e, Rust-plus-fuzz, root-solution and mixed-stack cases in `test/monorepo.test.mjs`, and `--packages` keeping a covered package.
-- Nits fixed: the 40-package cap no longer applies to an explicit `--packages` (it said "No package found" for `p45`), and `--packages ./` means the root. Not changed: note volume for very large repos. The test count in this log said 367 for `main`; it is 350.
+- Nits fixed: the 40-package cap no longer applies to an explicit `--packages` (it said "No package found" for `p45`), and `--packages ./` means the root. Not changed: note volume for very large repos.
+
+**Review round 2** (PR #8: blocking)
+- The left-out rule dropped packages under a bare workspace root (`{"private":true}` plus `packages/*`), leaving an empty proposal and a false note. A package is now covered only when the root proposes every stage the package would add. Tests: the bare-root and lint-only-root cases. The test count in this log said 367 for `main`; it is 350.
