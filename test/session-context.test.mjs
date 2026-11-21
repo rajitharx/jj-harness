@@ -20,10 +20,15 @@ test("reports branch, dirty files and verify commands", async () => {
   const text = await context(root);
   assert.match(text, /^Branch: feature\/x$/m);
   assert.match(text, /^Dirty files \(2\): README\.md, new\.ts$/m);
-  assert.match(text, /`\{files\}` = only the changed files are checked/);
+  assert.match(text, /`\{files\}`\/`\{dirs\}` = only the changed files or their directories are checked/);
   assert.match(text, /^- test: npx vitest related --run \{files\}$/m);
   assert.match(text, /^- typecheck: npx tsc --noEmit$/m);
   assert.doesNotMatch(text, /harness-init/);
+});
+
+test("shows a command's file filter", async () => {
+  const root = makeRepo({ verify: { lint: { run: "npx eslint {files}", files: ["**/*.ts", "**/*.tsx"] } } });
+  assert.match(await context(root), /^- lint: npx eslint \{files\} \(only for \*\*\/\*\.ts, \*\*\/\*\.tsx\)$/m);
 });
 
 test("lists at most 10 dirty files and counts the rest", async () => {

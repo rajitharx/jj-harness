@@ -76,7 +76,7 @@ test("policies receive input and resolved config", async () => {
     policies: { Stop: [(input, config) => ((seen = { input, config }), { kind: "allow" })] },
   });
   assert.equal(seen.input.stop_hook_active, false);
-  assert.equal(seen.config.verify.test, "npm test");
+  assert.deepEqual(seen.config.verify.test, { run: "npm test" });
 });
 
 test("fail open: throwing policy is logged and treated as allow", async () => {

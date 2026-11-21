@@ -201,6 +201,21 @@ test("a {files} stage is skipped when only deletions changed; whole-project stag
   assert.equal(typecheck.runs(), 1);
 });
 
+test("file filters: a docs-only change skips filtered stages and never reaches strict tools", async () => {
+  const lint = counter(1);
+  const typecheck = counter(1);
+  const root = repo({
+    lint: { run: `${lint.cmd} {files}`, files: ["**/*.ts"] },
+    typecheck: { run: typecheck.cmd, files: ["**/*.ts"] },
+  });
+  touch(root, "README.md", "docs only\n");
+  assert.deepEqual((await stop(root)).verdict, { kind: "allow" });
+  assert.equal(lint.runs() + typecheck.runs(), 0);
+  touch(root, "src/a.ts");
+  assert.equal((await stop(root)).verdict.kind, "block", "a matching change runs the filtered stage");
+  assert.equal(lint.runs(), 1);
+});
+
 test("a stage that runs past stopGate.timeoutSec fails as timed out", async () => {
   const root = repo({ test: `node -e "setTimeout(() => {}, 30000)"` }, { timeoutSec: 1 });
   touch(root);
