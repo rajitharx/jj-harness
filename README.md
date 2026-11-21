@@ -36,10 +36,10 @@ A config looks like this:
 ```json
 {
   "verify": {
-    "format": "npx --no prettier --write --ignore-unknown",
-    "lint": { "run": "npx --no eslint --no-warn-ignored {files}", "files": ["**/*.ts", "**/*.tsx"] },
-    "typecheck": { "run": "npx --no tsc --noEmit", "files": ["**/*.ts", "**/*.tsx", "**/tsconfig*.json"] },
-    "test": { "run": "npx --no vitest related --run --passWithNoTests {files}", "files": ["**/*.ts", "**/*.tsx"] }
+    "format": "npx --no -- prettier --write --ignore-unknown",
+    "lint": { "run": "npx --no -- eslint --no-warn-ignored {files}", "files": ["**/*.ts", "**/*.tsx"] },
+    "typecheck": { "run": "npx --no -- tsc --noEmit", "files": ["**/*.ts", "**/*.tsx", "**/tsconfig*.json"] },
+    "test": { "run": "npx --no -- vitest related --run --passWithNoTests {files}", "files": ["**/*.ts", "**/*.tsx"] }
   },
   "protectedPaths": ["secrets/**"],
   "blockedCommands": ["terraform destroy"],

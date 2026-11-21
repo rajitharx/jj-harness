@@ -53,7 +53,7 @@ test("init without --write prints the proposal and writes nothing", async () => 
   assert.equal(r.code, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   assert.deepEqual(out.stacks, ["node"]);
-  assert.equal(out.config.verify.test.run, "npx --no vitest related --run --passWithNoTests {files}");
+  assert.equal(out.config.verify.test.run, "npx --no -- vitest related --run --passWithNoTests {files}");
   assert.equal(out.config.stopGate.enabled, true, "built on templates/config.json");
   assert.ok(out.notes.length > 0);
   assert.deepEqual(
@@ -72,17 +72,17 @@ test("init --write creates the files and is idempotent", async () => {
   const root = nodeRepo();
   const first = await cli(root, "init", "--write");
   assert.equal(first.code, 0, first.stderr);
-  assert.match(first.stdout, /^created  \.harness\/config\.json$/m);
-  assert.match(first.stdout, /^created  CLAUDE\.md$/m);
-  assert.match(first.stdout, /^created  AGENTS\.md$/m);
-  assert.match(first.stdout, /^created  \.harness\/progress\.md$/m);
+  assert.match(first.stdout, /^created   \.harness\/config\.json$/m);
+  assert.match(first.stdout, /^created   CLAUDE\.md$/m);
+  assert.match(first.stdout, /^created   AGENTS\.md$/m);
+  assert.match(first.stdout, /^created   \.harness\/progress\.md$/m);
 
   const config = loadConfig(root);
-  assert.equal(config.verify.test.run, "npx --no vitest related --run --passWithNoTests {files}");
+  assert.equal(config.verify.test.run, "npx --no -- vitest related --run --passWithNoTests {files}");
   const claude = readFileSync(join(root, "CLAUDE.md"), "utf8");
   const name = root.split("/").pop();
   assert.ok(claude.startsWith(`# ${name}\n`), "project name filled");
-  assert.match(claude, /- Test: `npx --no vitest related --run --passWithNoTests \{files\}` \(only for `\*\*\/\*\.js`/);
+  assert.match(claude, /- Test: `npx --no -- vitest related --run --passWithNoTests \{files\}` \(only for `\*\*\/\*\.js`/);
   assert.match(claude, /- Format: not configured/);
   assert.doesNotMatch(claude, /\{\{/, "every placeholder filled");
   assert.match(readFileSync(join(root, "AGENTS.md"), "utf8"), /\[CLAUDE\.md\]\(CLAUDE\.md\)/);
@@ -91,6 +91,7 @@ test("init --write creates the files and is idempotent", async () => {
   const second = await cli(root, "init", "--write");
   assert.equal(second.code, 0, second.stderr);
   assert.equal((second.stdout.match(/^unchanged/gm) ?? []).length, 4, second.stdout);
+  assert.match(second.stdout, /^unchanged \.harness\/config\.json$/m, "the action and the path are separated");
   assert.deepEqual(snapshot(root), before);
 });
 
@@ -101,7 +102,7 @@ test("init --write merges a marker block into existing CLAUDE.md and AGENTS.md, 
 
   const r = await cli(root, "init", "--write");
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, /^updated  CLAUDE\.md \(appended the harness block\)$/m);
+  assert.match(r.stdout, /^updated   CLAUDE\.md \(appended the harness block\)$/m);
   const claude = readFileSync(join(root, "CLAUDE.md"), "utf8");
   assert.ok(claude.startsWith(`${userClaude}\n\n<!-- harness:start -->`), "user content kept, block appended");
   assert.ok(claude.endsWith("<!-- harness:end -->\n"));
@@ -112,19 +113,19 @@ test("init --write merges a marker block into existing CLAUDE.md and AGENTS.md, 
   const edited = claude.replace("<!-- harness:start -->", "Before the block.\n<!-- harness:start -->") + "After the block.\n";
   writeFile(root, "CLAUDE.md", edited);
   const custom = JSON.parse(readFileSync(join(root, ".harness/config.json"), "utf8"));
-  custom.verify.lint = { run: "npx --no eslint {files}", files: ["**/*.ts"] };
+  custom.verify.lint = { run: "npx --no -- eslint {files}", files: ["**/*.ts"] };
   writeFile(root, ".harness/config.json", JSON.stringify(custom));
 
   const again = await cli(root, "init", "--write");
   assert.equal(again.code, 0, again.stderr);
-  assert.match(again.stdout, /^kept     \.harness\/config\.json/m);
-  assert.match(again.stdout, /^updated  CLAUDE\.md \(replaced the harness block\)$/m);
+  assert.match(again.stdout, /^kept      \.harness\/config\.json/m);
+  assert.match(again.stdout, /^updated   CLAUDE\.md \(replaced the harness block\)$/m);
   const merged = readFileSync(join(root, "CLAUDE.md"), "utf8");
   const [head] = edited.split("<!-- harness:start -->");
   const [, rest] = edited.split("<!-- harness:end -->");
   assert.ok(merged.startsWith(`${head}<!-- harness:start -->`), "text before the block untouched");
   assert.ok(merged.endsWith(`<!-- harness:end -->${rest}`), "text after the block untouched");
-  assert.match(merged, /- Lint: `npx --no eslint \{files\}` \(only for `\*\*\/\*\.ts`\)/, "block describes the kept config");
+  assert.match(merged, /- Lint: `npx --no -- eslint \{files\}` \(only for `\*\*\/\*\.ts`\)/, "block describes the kept config");
 });
 
 test("init --write refuses broken markers and writes nothing", async () => {
@@ -146,14 +147,14 @@ test("init --write keeps an existing config unless --force-config", async () => 
 
   const kept = await cli(root, "init", "--write");
   assert.equal(kept.code, 0, kept.stderr);
-  assert.match(kept.stdout, /^kept     \.harness\/config\.json \(exists and differs from the proposal; pass --force-config to replace it\)$/m);
+  assert.match(kept.stdout, /^kept      \.harness\/config\.json \(exists and differs from the proposal; pass --force-config to replace it\)$/m);
   assert.equal(readFileSync(join(root, ".harness/config.json"), "utf8"), mine, "byte-identical");
   assert.match(readFileSync(join(root, "CLAUDE.md"), "utf8"), /- Test: `make test-related FILES=\{files\}`/);
 
   const forced = await cli(root, "init", "--write", "--force-config");
   assert.equal(forced.code, 0, forced.stderr);
-  assert.match(forced.stdout, /^replaced \.harness\/config\.json$/m);
-  assert.equal(loadConfig(root).verify.test.run, "npx --no vitest related --run --passWithNoTests {files}");
+  assert.match(forced.stdout, /^replaced  \.harness\/config\.json$/m);
+  assert.equal(loadConfig(root).verify.test.run, "npx --no -- vitest related --run --passWithNoTests {files}");
 });
 
 test("init --write refuses an invalid existing config without --force-config", async () => {

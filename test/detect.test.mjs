@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateConfig } from "../lib/config.mjs";
+import { loadConfig, validateConfig } from "../lib/config.mjs";
 import { detectProject } from "../lib/detect.mjs";
+import { runStage } from "../lib/verify.mjs";
 import { writeFile } from "./helpers.mjs";
 
 const JS = ["**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
@@ -35,10 +37,10 @@ const CASES = [
     },
     ["node"],
     {
-      test: "npx --no vitest related --run --passWithNoTests {files}",
-      lint: "npx --no eslint --no-warn-ignored {files}",
-      format: "npx --no prettier --write --ignore-unknown",
-      typecheck: "npx --no tsc --noEmit",
+      test: "npx --no -- vitest related --run --passWithNoTests {files}",
+      lint: "npx --no -- eslint --no-warn-ignored {files}",
+      format: "npx --no -- prettier --write --ignore-unknown",
+      typecheck: "npx --no -- tsc --noEmit",
     },
     [/Package manager: npm/],
   ],
@@ -64,7 +66,7 @@ const CASES = [
     "bun + vitest config file + prettierrc",
     { "package.json": pkg(), "bun.lockb": "", "vitest.config.ts": "", ".prettierrc": "{}" },
     ["node"],
-    { test: "bunx vitest related --run --passWithNoTests {files}", format: "bunx prettier --write --ignore-unknown" },
+    { test: "bunx --no-install vitest related --run --passWithNoTests {files}", format: "bunx --no-install prettier --write --ignore-unknown" },
     [/bun/],
   ],
   [
@@ -78,7 +80,7 @@ const CASES = [
     "node with no test runner gets no test command",
     { "package.json": pkg({ eslint: "9" }) },
     ["node"],
-    { lint: "npx --no eslint --no-warn-ignored {files}" },
+    { lint: "npx --no -- eslint --no-warn-ignored {files}" },
     [/No related-test command/, /never fall back to the full suite/],
   ],
   [
@@ -143,14 +145,21 @@ const CASES = [
     "rust: no test command, and a note to ask",
     { "Cargo.toml": "[package]\nname = 'x'\n" },
     ["rust"],
-    { format: "cargo fmt --", lint: "cargo clippy", typecheck: "cargo check" },
+    { format: "rustfmt --edition 2021", lint: "cargo clippy", typecheck: "cargo check" },
     [/no related-test mode/, /never add it silently/],
+  ],
+  [
+    "rust: rustfmt gets the edition from Cargo.toml",
+    { "Cargo.toml": '[package]\nname = "x"\nedition = "2024"\n' },
+    ["rust"],
+    { format: "rustfmt --edition 2024", lint: "cargo clippy", typecheck: "cargo check" },
+    [/rustfmt --edition 2024/],
   ],
   [
     "several stacks: the first with commands wins, the rest go to notes",
     { "package.json": pkg({ vitest: "1" }), "go.mod": "module x\n" },
     ["node", "go"],
-    { test: "npx --no vitest related --run --passWithNoTests {files}" },
+    { test: "npx --no -- vitest related --run --passWithNoTests {files}" },
     [/Also found a go project \(go\.mod\).*go test \{dirs\}.*Ask the user which stack/],
   ],
   [
@@ -164,7 +173,7 @@ const CASES = [
     "invalid package.json still detects from config files",
     { "package.json": "{ nope", "vitest.config.mjs": "" },
     ["node"],
-    { test: "npx --no vitest related --run --passWithNoTests {files}" },
+    { test: "npx --no -- vitest related --run --passWithNoTests {files}" },
     [/not valid JSON/],
   ],
   ["nothing recognisable", { "README.md": "hi" }, [], {}, [/No supported stack found/]],
@@ -207,4 +216,57 @@ test("detectProject never proposes a full-suite test command", () => {
     if (t === undefined) continue;
     assert.ok(/\{files\}|\{dirs\}|--testmon/.test(t), t);
   }
+});
+
+const hasNpx = (() => {
+  try {
+    execFileSync("npx", ["--version"], { stdio: "ignore", timeout: 20_000 });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+// String tables can't tell whether npx hands the tool its own flags (it didn't
+// with `npx --no tsc --noEmit`: npm parsed --noEmit). Run the generated
+// commands against stub tools that print the argv they received.
+test("generated npm commands pass every flag through npx to the tool", { skip: !hasNpx && "npx not on PATH" }, async () => {
+  const stubs = ["tsc", "jest", "vitest", "eslint", "prettier"];
+  const project = (devDependencies, extra = {}) => {
+    const root = fixture({
+      "package.json": { name: "app", devDependencies },
+      "package-lock.json": "{}",
+      "tsconfig.json": "{}",
+      "eslint.config.js": "",
+      "src/a.ts": "export {};\n",
+      ...extra,
+    });
+    for (const tool of stubs) {
+      const bin = join(root, "node_modules", ".bin", tool);
+      writeFile(root, `node_modules/.bin/${tool}`, `#!/usr/bin/env node\nconsole.log(JSON.stringify(process.argv.slice(2)));\n`);
+      chmodSync(bin, 0o755);
+    }
+    const { verify } = detectProject(root);
+    writeFile(root, ".harness/config.json", JSON.stringify({ verify }));
+    return loadConfig(root);
+  };
+  const jestProject = project({ jest: "29", eslint: "9", prettier: "3", typescript: "5" });
+  const vitestProject = project({ vitest: "2" });
+
+  const cases = [
+    // [config, stage, argv the stub must receive]
+    [jestProject, "typecheck", ["--noEmit"]],
+    [jestProject, "test", ["--findRelatedTests", "--passWithNoTests", "src/a.ts"]],
+    [jestProject, "lint", ["--no-warn-ignored", "src/a.ts"]],
+    [jestProject, "format", ["--write", "--ignore-unknown", "src/a.ts"]],
+    [vitestProject, "test", ["related", "--run", "--passWithNoTests", "src/a.ts"]],
+  ];
+  const results = await Promise.all(cases.map(([config, stage]) => runStage(stage, config, ["src/a.ts"], { timeoutMs: 60_000 })));
+  cases.forEach(([config, stage, argv], i) => {
+    const r = results[i];
+    assert.equal(r.ok, true, `${stage}: ${r.command}\n${r.output}`);
+    assert.match(r.command, /^npx --no -- /);
+    const printed = r.output.trim().split("\n").filter((l) => l.startsWith("["));
+    assert.deepEqual(printed.map((l) => JSON.parse(l)), [argv], `${stage}: ${r.command}\n${r.output}`);
+  });
 });

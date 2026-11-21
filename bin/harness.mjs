@@ -87,7 +87,7 @@ async function init(flags, { cwd, out, err }) {
     mkdirSync(dirname(join(root, c.path)), { recursive: true });
     writeFileSync(join(root, c.path), c.text);
   }
-  for (const c of changes) out(`${c.action.padEnd(9)}${c.path}${c.why ? ` (${c.why})` : ""}\n`);
+  for (const c of changes) out(`${c.action.padEnd(10)}${c.path}${c.why ? ` (${c.why})` : ""}\n`);
   if (detection.notes.length) out(`\nNotes:\n${detection.notes.map((n) => `- ${n}`).join("\n")}\n`);
   return 0;
 }
