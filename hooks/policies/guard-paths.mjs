@@ -13,7 +13,7 @@ export async function guardPaths(input, config) {
 
   const abs = resolve(input.cwd || config.root, raw.replace(/^~(?=$|[/\\])/, homedir()));
   const rel = relative(config.root, abs);
-  const inside = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  const inside = rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
   const candidates = inside ? [toPosix(rel)] : [];
   const absPosix = toPosix(abs);
 
@@ -38,6 +38,8 @@ function toPosix(p) {
  * Compile a glob to an anchored RegExp. Supports `**` (any number of path
  * segments, as a whole segment), `*` (any run of non-`/` characters), `?`
  * (one non-`/` character). Wildcards match dot-files. Everything else is literal.
+ * Matching ignores case, because macOS and Windows filesystems usually do:
+ * `.ENV` is the same file as `.env` there.
  * @param {string} glob
  */
 function globToRegExp(glob) {
@@ -56,5 +58,5 @@ function globToRegExp(glob) {
     }
     if (!last) re += "/";
   });
-  return new RegExp(`^${re}$`);
+  return new RegExp(`^${re}$`, "i");
 }

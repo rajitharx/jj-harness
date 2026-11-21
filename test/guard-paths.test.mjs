@@ -23,6 +23,9 @@ const MUST_BLOCK = [
   ["~/.ssh/id_ed25519", "**/id_ed25519*"],
   ["~/.ssh/id_rsa", "**/id_rsa*"],
   ["/etc/ssl/private/site.key", "**/*.key"],
+  [".ENV", ".env"],
+  ["certs/server.KEY", "**/*.key"],
+  [".Git/config", ".git/**"],
 ];
 
 const MUST_ALLOW = [
@@ -76,6 +79,12 @@ test("outside the root only **/ patterns apply, against the absolute path", asyn
   assert.deepEqual(await edit("/elsewhere/secrets/a.txt", { c }), { kind: "allow" });
   // …but `**/.env` still catches it.
   assert.equal((await edit("/elsewhere/.env", { c })).kind, "block");
+});
+
+test("a directory whose name starts with '..' is inside the root", async () => {
+  const c = loadConfig(makeProject({ protectedPaths: ["..vault/**"] }));
+  assert.equal((await edit("..vault/token", { cwd: c.root, c })).kind, "block");
+  assert.equal((await edit("../..vault/token", { cwd: join(c.root, "sub"), c })).kind, "block");
 });
 
 test("glob semantics: **, *, ? and dot-files", async () => {

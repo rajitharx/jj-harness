@@ -32,7 +32,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 
 ## 2. Guardrails ✅
 
-- [x] `guard-bash`: deny `rm -rf` on root, home, `.`/`..` or bare globs; force-push (`--force`, `-f`, `--force-with-lease`, `+refspec`) to main/master; piping a download into a shell (`curl … | sh`, `bash <(curl …)`, `sh -c "$(curl …)"`); `DROP`/`TRUNCATE` sent to a database client; `mkfs`, `dd of=/dev/…`, `chmod -R … /` and fork bombs; plus `config.blockedCommands`. Rules are one table, checked per segment of a quote-aware command split, including nested `bash -c`/`eval` strings
+- [x] `guard-bash`: deny `rm -rf` on root, home, `.`/`..` or bare globs; force-push (`--force`, `-f`, `--force-with-lease`, `+refspec`, or a plain force-push while on main) to main/master, and deleting main/master; piping a download into a shell (`curl … | sh`, `bash <(curl …)`, `sh -c "$(curl …)"`); `DROP`/`TRUNCATE` sent to a database client; `mkfs`, `dd of=/dev/…`, `chmod -R … /` and fork bombs; plus `config.blockedCommands`. Rules are one table, checked over a quote-aware parse of the command, including heredocs, substitutions and nested `bash -c`/`eval` strings
 - [x] `guard-paths`: deny Edit/Write/MultiEdit/NotebookEdit on `config.protectedPaths` (zero-dependency glob matching relative to `config.root`; `**/` patterns also match absolute paths outside the root)
 - [x] Tests: tables of commands and paths that must be denied, and ones that must be allowed, plus an end-to-end `run.mjs` deny
 
@@ -97,19 +97,20 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 ### Step 2: Guardrails (2026-11-21)
 
 **Shipped**
-- `guard-bash` (PreToolUse, Bash only): one `RULES` table of `{ scope, test, reason }`. A small quote-aware parser splits the command into pipelines (on `&&`, `||`, `;`, `&`, newlines, parentheses, backticks) and segments (on `|`), and strips wrappers (`sudo`, `env`, `VAR=x`, `nohup`, …). Rules run on the raw command, on each pipeline or on each segment, whichever the check needs. `bash -c "…"` and `eval "…"` strings are checked recursively. It blocks:
-  - `rm` with recursive and force flags in any spelling, on `/`, `/*`, `~`, `~/`, `$HOME`, `*`, `.`, `..`, `./*` (`rm -rf node_modules dist` is allowed)
-  - `git push` with `--force`, `-f`, `--force-with-lease` or `+refspec` to `main`/`master` (including `HEAD:main` and `refs/heads/main`); force-pushes to other branches are allowed
-  - downloads piped or substituted into a shell (`curl … | sh`, `| sudo bash`, `bash <(curl …)`, `sh -c "$(curl …)"`); `curl … | jq` and `| python3 -m json.tool` are allowed
-  - `DROP DATABASE|SCHEMA|TABLE`, `TRUNCATE` and Mongo `dropDatabase()` when the same pipeline invokes psql, mysql, mariadb, sqlite3, sqlcmd or mongosh
+- `guard-bash` (PreToolUse, Bash only): one `RULES` table of `{ scope, test, reason }`. A small quote-aware parser splits the command into pipelines (on `&&`, `||`, `;`, `&`, newlines, parentheses) and segments (on `|`). It attaches heredoc bodies to the command that reads them, records command substitutions (`$(…)`, backticks, `<(…)`), and strips wrappers (`sudo`, `env`, `VAR=x`, `nohup`, `nice`, `timeout <n>`, `xargs`, …). Rules run on the raw command, on each pipeline or on each segment, whichever the check needs. Substitutions, `bash -c "…"`, `eval "…"` and heredocs fed to a shell are checked recursively. It blocks:
+  - `rm` with recursive and force flags in any spelling, on `/`, `/*`, `~`, `~/`, `$HOME`, `*`, `.*`, `.`, `..`, `../..`, `./*`, `../*`, `$PWD`, `$(pwd)`, including `echo / | xargs rm -rf` (`rm -rf node_modules dist` is allowed)
+  - `git push` with `--force`, `-f`, `--force-with-lease` or `+refspec` to `main`/`master` (including `HEAD:main` and `refs/heads/main`). With no refspec or a `HEAD` destination, the current branch is read from `<root>/.git/HEAD`, following a worktree's `gitdir:` file; if it can't be read, the push is allowed. Force-pushes to other branches are allowed
+  - deleting main/master on the remote (`git push origin :main`, `--delete main`)
+  - downloads piped or substituted into a shell (`curl … | sh`, `| sudo bash`, `/bin/bash <(curl …)`, `bash -lc "$(curl …)"`, `eval "$(curl …)"`, `source <(curl …)`); quoted mentions such as `echo "bash <(curl …)"` and `curl … | jq` and `| python3 -m json.tool` are allowed
+  - `DROP DATABASE|SCHEMA|TABLE`, `TRUNCATE` and Mongo `dropDatabase()` when the same pipeline invokes psql, mysql, mariadb, sqlite3, sqlcmd or mongosh, including SQL passed in a heredoc
   - `mkfs*`, `dd of=/dev/…` (except `/dev/null`, stdout, stderr), `chmod -R` on `/`, fork bombs
   - any `config.blockedCommands` regex; the reason names the pattern
 
   Each reason has the form ``Blocked `<command>`: <why>. <safer alternative>``.
-- `guard-paths` (PreToolUse, Edit/Write/MultiEdit/NotebookEdit): resolves the path against `cwd` (expanding a leading `~`), makes it relative to `config.root`, and matches it against `config.protectedPaths` with a private glob-to-RegExp compiler (`**`, `*`, `?`, wildcards match dot-files). For paths outside the root, only `**/` patterns apply, matched against the absolute path, so `~/.ssh/id_ed25519` is caught. The reason names the matched pattern.
+- `guard-paths` (PreToolUse, Edit/Write/MultiEdit/NotebookEdit): resolves the path against `cwd` (expanding a leading `~`), makes it relative to `config.root`, and matches it against `config.protectedPaths` with a private glob-to-RegExp compiler (`**`, `*`, `?`, wildcards match dot-files, case-insensitive because macOS and Windows filesystems are). For paths outside the root, only `**/` patterns apply, matched against the absolute path, so `~/.ssh/id_ed25519` is caught. The reason names the matched pattern.
 - `hooks.json`: the PreToolUse matcher now includes `NotebookEdit`, so `guard-paths` sees notebook edits.
 
-**Verified:** `npm test` gives 141/141 passing: 53 must-block and 30 must-allow commands, 11 must-block and 8 must-allow paths, glob-semantics and outside-the-root cases, `blockedCommands`, and an end-to-end `run.mjs PreToolUse` deny for `rm -rf /`.
+**Verified:** `npm test` gives 191/191 passing after review round 1 (141/141 at first push). That covers 79 must-block and 47 must-allow commands, 14 must-block and 8 must-allow paths, current-branch force-pushes against fixture repos (plain `.git` and a worktree `gitdir:`, plus detached and unreadable HEAD), a linear-time check on 200 KB commands, glob-semantics and outside-the-root cases, `blockedCommands`, and an end-to-end `run.mjs PreToolUse` deny for `rm -rf /`.
 
 **Changes from the sketch**
 - Dropped "`git reset --hard` on shared branches" from `guard-bash`. It only touches the local working tree and branch (the reflog can recover commits), it has no remote target to check, and it's a common, legitimate command for agents. A project can still add it to `blockedCommands`.
@@ -124,8 +125,20 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - `loadConfig` rejects unknown `stopGate` keys.
 - Added tests for context-only PreToolUse output and SessionStart blocks shown as context.
 
+**Review round 1 (PR #2)**
+- Heredoc bodies are attached to the command that reads them, so `psql <<EOF … DROP TABLE … EOF` and `psql "$DATABASE_URL" <<'SQL' … SQL` are blocked. A heredoc fed to a shell (`bash <<EOF`) is checked as a nested command.
+- The download-into-shell check is now a segment rule on the parsed command. The shell is matched by basename (`/bin/bash`), `-c` may be part of a flag cluster (`-lc`), and `<(…)`, `$(…)` and backticks are recognised as substitutions. Raw-string regexes are gone, so quoted mentions (`echo "run: bash <(curl …)"`, commit messages) are allowed.
+- A force-push with no refspec or a `HEAD` destination uses the current branch from `.git/HEAD`. The read is in a small `readCurrentBranch(root)` helper, happens lazily, and fails open.
+- Deleting main/master (`:main`, `--delete`, `-d`) is blocked.
+- The fork-bomb regex is anchored with a lookbehind, so it runs in linear time. A 200 KB single token took about 20 s before.
+- `timeout <n>`, `nice`, `nohup`, `stdbuf` and `xargs` wrappers are stripped. `echo /` or `printf` piped into `xargs rm -rf` is checked. `../..`, `.*`, `../*`, `$PWD` and `$(pwd)` are dangerous rm targets.
+- guard-paths matches case-insensitively (`.ENV`, `server.KEY`), and an in-root directory named `..foo/` counts as inside the root.
+
 **Known gaps**
-- The guards are best-effort pattern matching, not a sandbox. Obfuscation gets past them (variables such as `rm -rf $(pwd)` or `$DIR`, aliases, base64, scripts written to a file and then run, SQL files fed through `psql < drop.sql`).
-- A bare `git push --force` (no refspec) while on main is allowed, because the policy is pure and doesn't read the current branch. Deleting main (`git push origin :main`, `--delete main`) isn't blocked either.
-- The SQL rule can give false positives when one pipeline mixes a database client with unrelated text that contains `DROP TABLE`.
-- The defaults block `.env.example` (it matches `.env.*`), and because project `protectedPaths` only extend the defaults, a project can't unblock it. `.envrc` isn't protected by default.
+- The guards are best-effort pattern matching, not a sandbox. Obfuscation gets past them: variables such as `$DIR` (only the literal `$PWD`/`$(pwd)` forms are caught), aliases, base64, and scripts written to a file and then run.
+- SQL in files isn't visible: `psql -f drop.sql` and `psql < drop.sql` are allowed.
+- The SQL rule treats a whole pipeline as one unit, so it can give false positives, e.g. `cat schema.sql | grep -v "DROP TABLE" | psql` is blocked.
+- The current branch comes from `config.root`. A push after `cd` into another repo, or a `push.default` that targets a different upstream, can be judged against the wrong branch.
+- `.git` inside submodules or other repos isn't protected, because the default is `.git/**`, not `**/.git/**`.
+- The defaults block `.env.example` (it matches `.env.*`), and because project `protectedPaths` only extend the defaults, a project can't unblock it. Open question: a future `allowPaths` setting, or excluding `.env.example`/`.env.sample`/`.env.template` by default. `.envrc` isn't protected by default.
+- Case-insensitive path matching also applies on case-sensitive Linux filesystems. That's slightly over-protective, but safe.

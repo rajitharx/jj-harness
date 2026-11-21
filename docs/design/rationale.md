@@ -19,7 +19,7 @@ After that the user does nothing different. The hooks run on their own. Skills a
 - **One per-project file**: `.harness/config.json`, owned by `lib/config.mjs`. No other module knows its path or defaults (per *split ownership*).
 - **One hook entry point**: `hooks/run.mjs <Event>`. `hooks.json` only routes events. `hooks/policies/index.mjs` is the single list of policies for each event. A test fails if the two disagree (per *hand-synced list*).
 - **Deep runtime**: `runHook(event, input) → HookResult` is the whole public surface. Policies return a small `Verdict` union, and merging it into Claude Code's exit codes and JSON happens in one place, so the wire protocol doesn't leak into the policies.
-- **Fail open**: if a policy crashes, it logs to stderr and allows. A broken harness must never brick a session. Guards are the exception: they are pure and unit-tested.
+- **Fail open**: if a policy crashes, it logs to stderr and allows. A broken harness must never brick a session. Guards are the exception: they are unit-tested and nearly pure. The only I/O is `guard-bash` reading `.git/HEAD` to find the current branch, and it allows the command if that read fails.
 - **Zero dependencies**: Node ≥22 stdlib only, so installing the plugin never runs `npm install`.
 
 ## Synthesis decision
