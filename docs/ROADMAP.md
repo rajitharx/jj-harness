@@ -21,6 +21,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - [x] Stub modules, skills, agents and templates with `not implemented` bodies
 - [x] CI workflow, MIT license, README
 - [x] Design rationale (`docs/design/rationale.md`)
+- [x] `CLAUDE.md` describing the repo rules and the task workflow (branch → implement → document → PR → separate reviewer → squash-merge)
 
 ## 1. Core runtime: config and hook dispatch ✅
 
