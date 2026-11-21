@@ -25,6 +25,8 @@ After that the user does nothing different. The hooks run on their own. Skills a
 - **Detection is code, not prose**: `lib/detect.mjs` turns a project's manifests into proposed commands (`vitest related --run {files}`, `jest --findRelatedTests {files}`, `go test {dirs}`, `pytest --testmon`, …) and notes where a stack has no related-test mode. It reads files only, and table-driven fixture tests pin it down. Multiple stacks aren't merged (one entry has one filter); the first stack with commands wins and the rest are reported.
 - **A small CLI for the skills**: `bin/harness.mjs init [--write] [--force-config]` and `verify [--all]`. Skills reach it through their base directory (`<skill base dir>/../../bin/harness.mjs`), so the deterministic parts (detection, merging the `CLAUDE.md` marker block, running the checks) are tested code, and the skills keep only the judgement: confirming commands, asking the user, reporting. `verify` runs through the same `runStage` and changed-file source as the Stop gate.
 
+- **Agents are prompts with least-privilege tools**: `reviewer` gets `Read, Grep, Glob, Bash` and must verify each finding before reporting it, and `test-writer` gets an explicit list without network tools. Skills reference them as `harness:<name>`, and a test checks that every reference resolves.
+
 ## Public surface
 
 Three things outside code can depend on, each kept small:
@@ -62,4 +64,4 @@ B is the base. From A I kept generating `CLAUDE.md` into the project, because pr
 
 ## Next implementation step
 
-Workflow skills done (see `docs/ROADMAP.md` step 4). Next: step 5, the agents. Start with `reviewer`, which the `review` skill already calls as `harness:reviewer`. It must be read-only and report only verified correctness, security and test-gap findings, each with a file, a line and a failure scenario. Then `test-writer`, which follows the project's test conventions and runs the tests through `bin/harness.mjs verify`.
+Agents done (see `docs/ROADMAP.md` step 5): `harness:reviewer` (read-only tools, verified and tagged findings, a verdict) and `harness:test-writer` (project-style tests, related tests only, tests and fixtures only). Next: step 6, dogfood and release. Add end-to-end hook tests against a fixture project, try the plugin locally with `claude --plugin-dir .` (including `/harness:review` with the real reviewer agent and a `harness:test-writer` run, since agent behaviour can only be checked by use), then polish the README and tag `v0.1.0`.
