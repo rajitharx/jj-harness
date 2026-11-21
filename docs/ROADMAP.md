@@ -8,7 +8,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | - | ---- | ------ |
 | 0 | Scaffold and design sketch | ✅ |
 | 1 | Core runtime: config and hook dispatch | ✅ |
-| 2 | Guardrails | ⬜ |
+| 2 | Guardrails | ✅ |
 | 3 | Quality loop | ⬜ |
 | 4 | Workflow skills | ⬜ |
 | 5 | Agents | ⬜ |
@@ -30,11 +30,11 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - [x] `hooks/run.mjs`: survives bad stdin and unexpected errors, and always exits 0
 - [x] Tests: `test/config.test.mjs`, `test/harness.test.mjs`, `test/run.test.mjs`
 
-## 2. Guardrails ⬜
+## 2. Guardrails ✅
 
-- [ ] `guard-bash`: deny `rm -rf` on root, home or `*`, force-push to main/master, `git reset --hard` on shared branches, `curl … | sh`, `DROP`/`TRUNCATE`, plus `config.blockedCommands`
-- [ ] `guard-paths`: deny Edit/Write/MultiEdit on `config.protectedPaths` (glob matching relative to `config.root`)
-- [ ] Tests: tables of commands and paths that must be denied, and ones that must be allowed
+- [x] `guard-bash`: deny `rm -rf` on root, home, `.`/`..` or bare globs; force-push (`--force`, `-f`, `--force-with-lease`, `+refspec`) to main/master; piping a download into a shell (`curl … | sh`, `bash <(curl …)`, `sh -c "$(curl …)"`); `DROP`/`TRUNCATE` sent to a database client; `mkfs`, `dd of=/dev/…`, `chmod -R … /` and fork bombs; plus `config.blockedCommands`. Rules are one table, checked per segment of a quote-aware command split, including nested `bash -c`/`eval` strings
+- [x] `guard-paths`: deny Edit/Write/MultiEdit/NotebookEdit on `config.protectedPaths` (zero-dependency glob matching relative to `config.root`; `**/` patterns also match absolute paths outside the root)
+- [x] Tests: tables of commands and paths that must be denied, and ones that must be allowed, plus an end-to-end `run.mjs` deny
 
 ## 3. Quality loop ⬜
 
@@ -92,4 +92,40 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - `runHook` takes an optional third argument, `{ policies, log }`, used only by tests. It's the smallest way to test merging without exporting internals.
 - Project `protectedPaths` **add to** the defaults instead of replacing them, so a project can't accidentally turn off `.env` protection. `templates/config.json` now starts with an empty list, so the defaults aren't listed twice.
 
-**Known gap:** the five policies are still stubs that throw. Until steps 2 and 3 land, every hook logs a "not implemented" line to stderr and allows the action.
+**Known gap:** the five policies were stubs that throw. Step 2 implemented `guard-bash` and `guard-paths`. The step 3 policies (`format-on-edit`, `verify-gate`, `session-context`) still log a "not implemented" line to stderr on their events and allow the action.
+
+### Step 2: Guardrails (2026-11-21)
+
+**Shipped**
+- `guard-bash` (PreToolUse, Bash only): one `RULES` table of `{ scope, test, reason }`. A small quote-aware parser splits the command into pipelines (on `&&`, `||`, `;`, `&`, newlines, parentheses, backticks) and segments (on `|`), and strips wrappers (`sudo`, `env`, `VAR=x`, `nohup`, …). Rules run on the raw command, on each pipeline or on each segment, whichever the check needs. `bash -c "…"` and `eval "…"` strings are checked recursively. It blocks:
+  - `rm` with recursive and force flags in any spelling, on `/`, `/*`, `~`, `~/`, `$HOME`, `*`, `.`, `..`, `./*` (`rm -rf node_modules dist` is allowed)
+  - `git push` with `--force`, `-f`, `--force-with-lease` or `+refspec` to `main`/`master` (including `HEAD:main` and `refs/heads/main`); force-pushes to other branches are allowed
+  - downloads piped or substituted into a shell (`curl … | sh`, `| sudo bash`, `bash <(curl …)`, `sh -c "$(curl …)"`); `curl … | jq` and `| python3 -m json.tool` are allowed
+  - `DROP DATABASE|SCHEMA|TABLE`, `TRUNCATE` and Mongo `dropDatabase()` when the same pipeline invokes psql, mysql, mariadb, sqlite3, sqlcmd or mongosh
+  - `mkfs*`, `dd of=/dev/…` (except `/dev/null`, stdout, stderr), `chmod -R` on `/`, fork bombs
+  - any `config.blockedCommands` regex; the reason names the pattern
+
+  Each reason has the form ``Blocked `<command>`: <why>. <safer alternative>``.
+- `guard-paths` (PreToolUse, Edit/Write/MultiEdit/NotebookEdit): resolves the path against `cwd` (expanding a leading `~`), makes it relative to `config.root`, and matches it against `config.protectedPaths` with a private glob-to-RegExp compiler (`**`, `*`, `?`, wildcards match dot-files). For paths outside the root, only `**/` patterns apply, matched against the absolute path, so `~/.ssh/id_ed25519` is caught. The reason names the matched pattern.
+- `hooks.json`: the PreToolUse matcher now includes `NotebookEdit`, so `guard-paths` sees notebook edits.
+
+**Verified:** `npm test` gives 141/141 passing: 53 must-block and 30 must-allow commands, 11 must-block and 8 must-allow paths, glob-semantics and outside-the-root cases, `blockedCommands`, and an end-to-end `run.mjs PreToolUse` deny for `rm -rf /`.
+
+**Changes from the sketch**
+- Dropped "`git reset --hard` on shared branches" from `guard-bash`. It only touches the local working tree and branch (the reflog can recover commits), it has no remote target to check, and it's a common, legitimate command for agents. A project can still add it to `blockedCommands`.
+- Added `dd`, `mkfs`, `chmod -R /` and fork-bomb rules, and `--force-with-lease` to main counts as a force-push.
+- The glob matcher is private to `guard-paths` instead of `lib/glob.mjs`, because nothing else needs it yet.
+- `.envrc.example` is allowed on purpose: the default patterns are `.env` and `.env.*`, and `.envrc…` has no dot after `.env`.
+
+**Review follow-ups (from the PR #1 review)**
+- `hooks/run.mjs` sets `process.exitCode` instead of calling `process.exit()`, so stdout over 64 KB isn't cut off on macOS pipes. `mergeVerdicts` caps block reasons and context at 16 KB with a `…[truncated]` marker. A spawned-`run.mjs` test with a reason over 64 KB checks that stdout parses.
+- `package.json` `engines.node` is `>=22` (the test glob needs Node 21+); `CLAUDE.md` and the rationale say Node ≥22.
+- `normalize` rejects a `block` with an empty or whitespace-only reason (fails open as an invalid verdict).
+- `loadConfig` rejects unknown `stopGate` keys.
+- Added tests for context-only PreToolUse output and SessionStart blocks shown as context.
+
+**Known gaps**
+- The guards are best-effort pattern matching, not a sandbox. Obfuscation gets past them (variables such as `rm -rf $(pwd)` or `$DIR`, aliases, base64, scripts written to a file and then run, SQL files fed through `psql < drop.sql`).
+- A bare `git push --force` (no refspec) while on main is allowed, because the policy is pure and doesn't read the current branch. Deleting main (`git push origin :main`, `--delete main`) isn't blocked either.
+- The SQL rule can give false positives when one pipeline mixes a database client with unrelated text that contains `DROP TABLE`.
+- The defaults block `.env.example` (it matches `.env.*`), and because project `protectedPaths` only extend the defaults, a project can't unblock it. `.envrc` isn't protected by default.
