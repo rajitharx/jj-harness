@@ -12,7 +12,7 @@ test("defaults when no config file exists", () => {
   assert.deepEqual(c.verify, {});
   assert.ok(c.protectedPaths.includes(".env"));
   assert.deepEqual(c.blockedCommands, []);
-  assert.deepEqual(c.stopGate, { enabled: true, maxAttempts: 3 });
+  assert.deepEqual(c.stopGate, { enabled: true, maxAttempts: 3, timeoutSec: 300 });
 });
 
 test("finds the project root from a nested cwd", () => {
@@ -30,14 +30,14 @@ test("merges project values over defaults; empty verify commands are dropped", (
       verify: { lint: "npm run lint", typecheck: "" },
       protectedPaths: ["secrets/**"],
       blockedCommands: ["terraform destroy"],
-      stopGate: { maxAttempts: 5 },
+      stopGate: { maxAttempts: 5, timeoutSec: 60 },
     }),
   );
   assert.deepEqual(c.verify, { lint: "npm run lint" });
   assert.ok(c.protectedPaths.includes("secrets/**"));
   assert.ok(c.protectedPaths.includes(".env"), "defaults are extended, not replaced");
   assert.deepEqual(c.blockedCommands, ["terraform destroy"]);
-  assert.deepEqual(c.stopGate, { enabled: true, maxAttempts: 5 });
+  assert.deepEqual(c.stopGate, { enabled: true, maxAttempts: 5, timeoutSec: 60 });
 });
 
 test("result is frozen", () => {
@@ -55,6 +55,9 @@ for (const [name, config] of [
   ["bad regex", { blockedCommands: ["("] }],
   ["bad maxAttempts", { stopGate: { maxAttempts: 0 } }],
   ["bad enabled", { stopGate: { enabled: "yes" } }],
+  ["zero timeoutSec", { stopGate: { timeoutSec: 0 } }],
+  ["fractional timeoutSec", { stopGate: { timeoutSec: 1.5 } }],
+  ["string timeoutSec", { stopGate: { timeoutSec: "300" } }],
   ["unknown stopGate key", { stopGate: { maxAttempt: 2 } }],
 ]) {
   test(`rejects ${name}`, () => {
