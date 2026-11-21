@@ -64,4 +64,11 @@ B is the base. From A I kept generating `CLAUDE.md` into the project, because pr
 
 ## Next implementation step
 
-Agents done (see `docs/ROADMAP.md` step 5): `harness:reviewer` (read-only tools, verified and tagged findings, a verdict) and `harness:test-writer` (project-style tests, related tests only, tests and fixtures only). Next: step 6, dogfood and release. Add end-to-end hook tests against a fixture project, try the plugin locally with `claude --plugin-dir .` (including `/harness:review` with the real reviewer agent and a `harness:test-writer` run, since agent behaviour can only be checked by use), then polish the README and tag `v0.1.0`.
+Post-0.1.0: see the ROADMAP known gaps. Step 6 shipped the end-to-end hook test, a live headless dogfood run (`docs/dogfood-v0.1.0.md`), `claude plugin validate` in CI and the release checklist; the `harness--v0.1.0` tag is created after the merge. Top follow-ups:
+
+1. **Dogfood the agents and the remaining skills.** `harness:reviewer`, `harness:test-writer`, `/harness:review`, `/harness:ship`, `/harness:plan`, `/harness:handoff` and `/harness:harness-init` loaded in the live run but weren't invoked. Agent behaviour (verified findings, tests-only edits) can only be checked by use.
+2. **Scope the Stop gate to the session's own changes.** It checks everything uncommitted, including work from before the session, and misses work committed mid-turn. A SessionStart snapshot of the dirty set and `HEAD` would fix both.
+3. **Make a passing gate visible.** Stop has no context channel, so a pass is silent and the agent told the user it hadn't run the checks. Options: a `systemMessage`, or a line in the next SessionStart context.
+4. **Close the cheapest guard gaps**: scripts piped or here-stringed into a shell (`echo '…' | bash`), `.env.example` being unprotectable (an `allowPaths` setting or default exclusions), and `**/.git/**`.
+5. **Monorepo detection**: look into workspace packages instead of the root only.
+6. **Plugin icon** (`ICON_MISSING`) if the plugin is ever submitted to the public directory.

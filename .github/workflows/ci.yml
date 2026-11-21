@@ -2,9 +2,29 @@ name: ci
 on: [push, pull_request]
 jobs:
   test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ matrix.node }}" }
+      - run: npm test
+
+  validate:
+    # `claude plugin validate` needs no login or API key. Pinned so a CLI
+    # release can't change the result without a commit here.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: npm test
+      - run: npm install -g @anthropic-ai/claude-code@2.1.330
+      # The plugin (and its skills, agents and hooks): errors fail the job. Not
+      # --strict, because the root CLAUDE.md (this repo's dev guide) is reported
+      # as "not loaded as plugin context", which is expected.
+      - run: claude plugin validate .
+      - run: claude plugin validate --strict .claude-plugin/marketplace.json
