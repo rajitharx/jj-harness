@@ -210,6 +210,103 @@ test("detectProject: file filters keep strict tools away from docs and config fi
   assert.ok(rust.typecheck.files.includes("**/*.rs") && rust.typecheck.files.includes("**/Cargo.toml"));
 });
 
+// [name, files, the directory detectProject runs in, expected rustfmt edition, a note that must appear]
+const WS = '[workspace]\nmembers = ["crates/*"]\n\n[workspace.package]\nedition = "2024"\n';
+const RUST_EDITIONS = [
+  ["no edition", { "Cargo.toml": '[package]\nname = "x"\n' }, ".", "2021", /default; Cargo.toml sets no edition/],
+  ["[package] edition", { "Cargo.toml": '[package]\nname = "x"\nedition = "2018"\n' }, ".", "2018", /\(from Cargo\.toml\)/],
+  [
+    "a comment with no space before # after the value",
+    { "Cargo.toml": '[package]\nname = "a#b" # c\nedition = "2018"#old\n' },
+    ".",
+    "2018",
+    /\(from Cargo\.toml\)/,
+  ],
+  [
+    "[package] edition wins over [workspace.package] in the same file",
+    { "Cargo.toml": '[workspace.package]\nedition = "2024"\n\n[package]\nname = "x"\nedition = "2018"\n' },
+    ".",
+    "2018",
+    /from Cargo\.toml/,
+  ],
+  [
+    "edition.workspace = true in a root package that is also the workspace",
+    { "Cargo.toml": '[package]\nname = "x"\nedition.workspace = true\n\n' + WS },
+    ".",
+    "2024",
+    /from \[workspace\.package\] in Cargo\.toml/,
+  ],
+  [
+    "virtual workspace manifest",
+    { "Cargo.toml": WS },
+    ".",
+    "2024",
+    /from \[workspace\.package\] in Cargo\.toml/,
+  ],
+  [
+    "member with edition.workspace = true finds the parent workspace",
+    { "Cargo.toml": WS, "crates/a/Cargo.toml": '[package]\nname = "a"\nedition.workspace = true # inherit\n' },
+    "crates/a",
+    "2024",
+    /from \[workspace\.package\] in \.\.\/\.\.\/Cargo\.toml/,
+  ],
+  [
+    "member with the inline-table form",
+    { "Cargo.toml": WS, "crates/a/Cargo.toml": '[package]\nname = "a"\nedition = { workspace = true }\n' },
+    "crates/a",
+    "2024",
+    /\.\.\/\.\.\/Cargo\.toml/,
+  ],
+  [
+    "member skips a parent Cargo.toml that is not a workspace",
+    {
+      "Cargo.toml": WS,
+      "crates/Cargo.toml": '[package]\nname = "mid"\nedition = "2015"\n',
+      "crates/a/Cargo.toml": '[package]\nname = "a"\nedition.workspace = true\n',
+    },
+    "crates/a",
+    "2024",
+    /\.\.\/\.\.\/Cargo\.toml/,
+  ],
+  [
+    "member with package.workspace pointing at the root",
+    {
+      "ws/Cargo.toml": '[workspace]\n[workspace.package]\nedition = "2018"\n',
+      "Cargo.toml": WS,
+      "ws/m/Cargo.toml": '[package]\nname = "m"\nworkspace = "../../"\nedition.workspace = true\n',
+    },
+    "ws/m",
+    "2024",
+    /\.\.\/\.\.\/Cargo\.toml/,
+  ],
+  [
+    "member inherits but no workspace edition exists",
+    { "crates/a/Cargo.toml": '[package]\nname = "a"\nedition.workspace = true\n' },
+    "crates/a",
+    "2021",
+    /default; the workspace edition was not found/,
+  ],
+  [
+    "edition keys in other tables are ignored",
+    {
+      "Cargo.toml":
+        "[package]\nname = \"x\"\nedition.workspace = true\n\n[target.'cfg(unix)'.dependencies]\nedition = \"2015\"\n\n[[bin]]\nedition = \"2015\"\n\n" +
+        WS,
+    },
+    ".",
+    "2024",
+    /from \[workspace\.package\]/,
+  ],
+];
+
+for (const [name, files, dir, edition, note] of RUST_EDITIONS) {
+  test(`detectProject: rustfmt edition: ${name}`, () => {
+    const d = detectProject(join(fixture(files), dir));
+    assert.equal(run(d.verify.format), `rustfmt --edition ${edition}`);
+    assert.ok(d.notes.some((n) => note.test(n)), `a note matches ${note}: ${JSON.stringify(d.notes)}`);
+  });
+}
+
 test("detectProject never proposes a full-suite test command", () => {
   for (const [, files] of CASES) {
     const t = run(detectProject(fixture(files)).verify.test);

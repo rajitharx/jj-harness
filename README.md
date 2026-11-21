@@ -6,7 +6,7 @@ A reusable agent harness for Claude Code, shipped as a plugin. Install it once a
 - **Verification loop**: runs format on every edit, and runs lint, typecheck and the tests related to the changed files before the agent can stop.
 - **Session memory**: injects branch, dirty files and the last progress note at session start.
 - **Workflow skills**: `harness-init` (detect the stack, write the config), `plan`, `verify`, `review`, `ship`, `handoff`.
-- **Agents**: `reviewer` (read-only), `test-writer`.
+- **Agents**: `reviewer` (read-only, verified findings only) and `test-writer` (tests in the project's style, related tests only). See [Agents](#agents).
 
 > Status: **in progress**. Progress and a per-step completion log are in [`docs/ROADMAP.md`](docs/ROADMAP.md); the design is in [`docs/design/rationale.md`](docs/design/rationale.md).
 
@@ -29,7 +29,7 @@ Then, in any project:
 - `CLAUDE.md` and `AGENTS.md`. If they already exist, only a block between `<!-- harness:start -->` and `<!-- harness:end -->` is inserted or updated. Your text is left as is.
 - `.harness/progress.md`, for the `handoff` skill's notes.
 
-Commit those four files. Under the hood the skill runs the plugin's CLI, which you can also run yourself: `node <plugin>/bin/harness.mjs init` (a dry run that prints JSON), `init --write [--force-config]`, and `verify [--all]`.
+Commit those four files. Under the hood the skill runs the plugin's CLI, which you can also run yourself: `node <plugin>/bin/harness.mjs init` (a dry run that prints JSON), `init --write [--force-config]`, and `verify [--all | --base <ref>]`. Plain `verify` checks the files that differ from `HEAD`. `--base main` also checks the files the branch changed since `main` (`git diff main...HEAD`), so it works on committed branches. `verify` exits 0 on `verify: passed` and also on `verify: nothing ran`, which means no check executed and is not a pass. It exits 1 when a check fails, and 2 on a usage, config or git error, including an unknown ref.
 
 A config looks like this:
 
@@ -60,6 +60,17 @@ The Stop gate checks only what changed, not the whole suite:
 - Before the agent stops, lint, typecheck and test run in that order. Each stage has a `stopGate.timeoutSec` limit, and the whole run has an 840 s budget (below the 900 s hook timeout). The first failure blocks the stop and shows its output. A passing tree is fingerprinted, so stopping again without changes doesn't re-run anything. After `stopGate.maxAttempts` blocks in a row, the gate gives up for that turn.
 - Harness state lives in `.harness/state/`, which ignores itself in git.
 
+## Agents
+
+The plugin ships two subagents. Claude Code names plugin agents `harness:<name>`.
+
+- **`harness:reviewer`** reviews a diff or a branch against a base ref. It reads the project's `CLAUDE.md`/`AGENTS.md` first, then looks for correctness bugs, security problems (injection, secrets, authorization, unsafe deserialization, path traversal), races and resource leaks, error-handling gaps, missing tests and rule breaches. It checks every finding against the code, reproducing it in a temp dir where it can, and tags it CONFIRMED (reproduced) or PLAUSIBLE (reasoned from the code). It returns findings ranked `blocking` / `should-fix` / `nit`, each with file:line, evidence and a fix, plus a "Checked and fine" list and `Verdict: approve | request changes`. Its tools are `Read, Grep, Glob, Bash`, with no editing tools. It uses Bash for `git diff`/`log`/`show`, the related tests and scratch scripts, and its instructions forbid changing files or git state.
+- **`harness:test-writer`** writes tests for a change. It follows the project's runner, layout and nearest existing test, prefers table-driven cases, and changes only test files and fixtures. If a test exposes a real bug, it stops and reports the bug with the failing test instead of fixing production code. It runs only the related tests (the `verify.test` command from `.harness/config.json`, or the files it wrote), then reports the command, the exact output and what it couldn't cover.
+
+To use them:
+
+- **Through the skill**: `/harness:review` collects the diff, sends it to `harness:reviewer` with the base ref and the rules files, re-checks each finding itself, and reports by severity. `review`, `ship` and `plan` offer `harness:test-writer` when changed behaviour has no tests.
+- **Directly**: mention the agent (`@agent-harness:reviewer review my branch against main`), or ask Claude to "use the harness:test-writer agent to cover `src/parse.ts`".
 ## Develop
 
 ```sh

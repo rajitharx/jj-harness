@@ -36,4 +36,4 @@ description: Turn a request into a written, checkable plan in .harness/plans/ be
 
 3. **Stop for approval.** Show the user the plan's path and a short summary, then wait for them to approve or change it before you implement anything. Skip the wait only if the user already said to go ahead.
 
-4. When implementing, follow the steps in order, run each step's verification, and update the plan file if the plan changes.
+4. When implementing, follow the steps in order, run each step's verification, and update the plan file if the plan changes. A step whose Verify line is a new test can be handed to the `harness:test-writer` agent.

@@ -11,7 +11,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 2 | Guardrails | ✅ |
 | 3 | Quality loop | ✅ |
 | 4 | Workflow skills | ✅ |
-| 5 | Agents | ⬜ |
+| 5 | Agents | ✅ |
 | 6 | Dogfood and release | ⬜ |
 
 ## 0. Scaffold and design sketch ✅
@@ -58,10 +58,13 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - [x] `handoff`: append a short dated progress entry (Done, In progress, Next, Open questions, Gotchas)
 - [x] Tests: `test/glob.test.mjs`, `test/detect.test.mjs`, `test/cli.test.mjs`, `test/skills.test.mjs`, plus filter and `{dirs}` cases in the verify, config, gate and session-context tests
 
-## 5. Agents ⬜
+## 5. Agents ✅
 
-- [ ] `reviewer`: read-only, reports only verified correctness, security and test-gap findings
-- [ ] `test-writer`: follows the project's test conventions and runs the tests
+- [x] `reviewer` (`agents/reviewer.md`): tools `Read, Grep, Glob, Bash` only. Reads `CLAUDE.md`/`AGENTS.md`, reviews a diff or base ref for correctness, security, concurrency/resource, error-handling, test-gap and project-rule problems. Checks every finding against the code or reproduces it in a temp dir outside the repo, tags it CONFIRMED or PLAUSIBLE, drops what it can't support, and returns `blocking`/`should-fix`/`nit` findings (file:line, claim, why, evidence, fix), a "Checked and fine" list, the checks it ran (`bin/harness.mjs verify --base <base>` when given the plugin path; "nothing ran" reported as no checks executed) and `Verdict: approve | request changes`. Its prompt forbids any file or git-state change
+- [x] `test-writer` (`agents/test-writer.md`): explicit tools `Read, Grep, Glob, Edit, Write, Bash`. Learns the runner, layout and nearest test's style; writes table-driven tests for happy, edge, error and regression cases; changes only tests and fixtures, and reports real bugs with the failing test instead of fixing code; no network, sleeps or fixed temp paths; runs only the related tests (`verify.test` with `{files}`, or the files it wrote) and reports the exact output and what it couldn't cover
+- [x] `review` skill passes the base ref, diff commands, rules files and plugin path (with `verify --base <base>`) to `harness:reviewer`, re-verifies each finding, and reports by severity with the verdict; `review`, `ship` and `plan` offer `harness:test-writer` for untested behaviour
+- [x] Tests: `test/agents.test.mjs` (frontmatter, documented fields only, reviewer has no editing tool, every `harness:<agent>` reference in skills resolves); the frontmatter parser moved to `test/helpers.mjs`
+- [x] Step 4 follow-up: rustfmt's edition for `edition.workspace = true` comes from the workspace root's `[workspace.package]` (`lib/detect.mjs`)
 
 ## 6. Dogfood and release ⬜
 
@@ -238,11 +241,12 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - Detection reads the root directory only. In a monorepo it doesn't look into workspace packages, and only one stack's commands are proposed.
 - `mypy .` checks the whole tree, which can be slow or pick up vendored code. The skill's "try each command" step is where that gets noticed.
 - Skills can't be unit-tested beyond their structure (frontmatter, CLI subcommands, the protected-path list). Whether an agent follows them is checked only by dogfooding (step 6).
-- `review` depends on the `reviewer` agent, which is still a stub until step 5.
+- `review` depends on the `reviewer` agent, which is still a stub until step 5. (Done in step 5.)
 - `verify --all` passes every tracked file on one command line. A very large repo can hit the OS argument limit.
 - File filters match case-insensitively, like `protectedPaths`, so `**/*.ts` also matches `A.TS`.
 - `bunx --no-install` is taken from the Bun docs (`bunx [flags] <package> [args]`). It isn't executed in the tests, because Bun isn't installed where they run.
 - rustfmt also formats the out-of-line modules that the edited file declares (`mod x;`), so editing `lib.rs` still reformats most of the crate. In a workspace, the edition comes from the root `Cargo.toml`, so a member with a different edition needs its own `rustfmt.toml`.
+- A crate that uses `edition.workspace = true` was formatted with rustfmt edition 2021 instead of the workspace edition: the regex didn't match that key, and in a member crate the `[workspace.package]` table lives in a parent `Cargo.toml` that detection never read (raised in the PR #4 review). **Fixed in step 5**: see that entry.
 - `ship` lists the default protected paths in its text. `test/skills.test.mjs` keeps that list in sync with `lib/config.mjs`, but the skill can't read the merged list from the CLI.
 
 **Review round 1 (PR #4)**
@@ -257,3 +261,84 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - Bun: `bunx --no-install` (from the Bun docs: flags go before the package name), so the gate never downloads a missing tool.
 - Rust format: `rustfmt --edition <edition>` on the edited file instead of `cargo fmt -- <file>`, which reformatted the whole crate. The edition is read from `Cargo.toml` (default 2021), and a new fixture case covers that.
 - `npm test`: 308/308 passing (306 before this round).
+
+### Step 5: Agents (2026-11-21)
+
+**Shipped**
+- **`agents/reviewer.md`**. Frontmatter: `name`, `description` (when to use it, and that it never edits), `tools: Read, Grep, Glob, Bash`. The prompt covers:
+  - **Inputs**: a diff or base ref, the changed files, the intent, focus areas and the plugin path. With none of these it finds the base itself, and it stops on an empty diff.
+  - **Read-only rules**: no file changes and no git command that changes state, the index or the tree. Scratch files go only in a `mktemp -d` dir outside the repo. Checks that would modify the repo are described, not run.
+  - **Process**: read `CLAUDE.md`/`AGENTS.md`, read each hunk in context (function, callers, tests), then the checklist (correctness, security, concurrency and resources, error handling, tests, project rules). Every candidate is verified: CONFIRMED if reproduced, PLAUSIBLE if reasoned from the code, dropped if unsupported. It runs `node "<plugin>/bin/harness.mjs" verify --base <base>` (review round 1) when given the plugin path, or else the project's test command for the affected files. No style nits unless the rules ask.
+  - **Output contract**: numbered findings `[blocking|should-fix|nit] file:line — claim (CONFIRMED|PLAUSIBLE)` with why it matters, evidence and a fix; "Checked and fine"; "Checks run"; `Verdict: approve | request changes`; "No findings." when there are none.
+- **`agents/test-writer.md`**. Frontmatter: `name`, `description`, `tools: Read, Grep, Glob, Edit, Write, Bash`. Process:
+  - learn the conventions from `CLAUDE.md`, `.harness/config.json`, the manifest and the nearest existing test;
+  - plan happy, edge, error and regression cases;
+  - write table-driven or parameterized tests in the file the project would use;
+  - change only tests and fixtures, never weaken existing tests, and use no network, sleeps or fixed temp paths;
+  - run only the related tests (`verify.test` with the placeholder replaced, or else the runner on the written files);
+  - fix wrong tests, but stop and report real bugs with the failing output.
+
+  Output: files, command, exact result, bugs found, and what it couldn't cover.
+- **`skills/review/SKILL.md`** now passes the reviewer the base ref and diff commands, the changed files and intent, the rules files (`CLAUDE.md`/`AGENTS.md`), the plugin path (for `verify`) and focus areas. It re-verifies each returned finding (keeping CONFIRMED only if its own check agrees), and reports blocking, then should-fix, then nit, with evidence, the checks run, the verdict and the raised/dropped counts. The severity names now match the agent's (`should-fix` replaced "important"/"minor"). It offers `harness:test-writer` for test-gap findings. `ship` (after verify) and `plan` (steps whose Verify is a new test) each got a one-line mention of `harness:test-writer`.
+- **`lib/detect.mjs`** (step 4 follow-up from the PR #4 review): the Rust edition no longer comes from a regex over the whole `Cargo.toml`. A small table-aware reader (`cargoTables`) takes `[package] edition`. For `edition.workspace = true` or `edition = { workspace = true }`, it reads `[workspace.package] edition` from the workspace root: the same manifest, the `package.workspace` path, or else the nearest parent `Cargo.toml` with a `[workspace]` table, which is how Cargo finds it. A virtual manifest uses its own `[workspace.package]`. Keys in other tables (`[target.'cfg(..)'.dependencies]`, `[[bin]]`) are ignored. The note says where the edition came from, and the default stays 2021.
+- README: an Agents section (what each does, its tools, and use through `/harness:review` or directly as `@agent-harness:reviewer`).
+
+**Verified:** `npm test` gives 327/327 passing (308 before this step), in about 7 s. New tests:
+- `test/agents.test.mjs` (8 tests):
+  - the shipped agent set;
+  - per agent: `name` equals the file name, a real `description`, only fields Claude Code documents for plugin agents, no stub text, and a non-trivial prompt;
+  - the reviewer has an explicit `tools` list with none of Edit, Write, MultiEdit or NotebookEdit;
+  - the test-writer has Read, Edit, Write and Bash;
+  - the reviewer's prompt contains the output-contract markers;
+  - every `harness:<name>` reference in any `skills/**/SKILL.md`, found by scanning, resolves to an `agents/<name>.md`. The test also asserts that the scan finds `harness:reviewer`, so it can't pass vacuously;
+  - a unit case showing the scanner skips `/harness:<skill>` commands and `<!-- harness:start -->` markers.
+- `test/detect.test.mjs`: an 11-case `RUST_EDITIONS` table:
+  - no edition;
+  - `[package]` edition, which wins over `[workspace.package]`;
+  - a root package with `edition.workspace = true`;
+  - a virtual workspace;
+  - a member inheriting from a parent, in both key forms;
+  - a non-workspace middle `Cargo.toml` being skipped;
+  - `package.workspace` overriding the nearest parent;
+  - an inheriting member with no workspace;
+  - decoy `edition` keys in other tables.
+
+  The member, inline-form and decoy cases fail on the old regex.
+- The frontmatter parser moved from `test/skills.test.mjs` to `test/helpers.mjs` (now CRLF-tolerant), and both tests share it.
+
+**Changes from the sketch**
+- **Frontmatter checked against the docs** (code.claude.com/docs/en/sub-agents and plugins/components, fetched 2026-11-21). Only `name`, `description` and `tools` are used. The docs say an omitted `tools` "inherits every tool available to subagents", so:
+  - the reviewer keeps an explicit read-only list;
+  - the test-writer also gets an explicit list, rather than omitting `tools`, so it doesn't inherit WebFetch/WebSearch (its prompt forbids network access), the Agent tool or MCP tools. Least privilege costs nothing here.
+
+  `model` is left unset so the user's subagent model order applies. `disallowedTools` would be redundant next to an allowlist. `permissionMode` and `hooks` are ignored for plugin agents, so they aren't used. The test pins the fields to the documented plugin-agent set, because Claude Code silently ignores unknown fields.
+- **The step 4 sketch** said the test-writer runs tests "through `bin/harness.mjs verify`". It runs the `verify.test` command on the files it wrote instead. `verify` takes no file arguments, and it tests every changed file, which includes unrelated work in the tree. The reviewer runs `verify --base <base>` with the diff's base ref (added in review round 1). Plain `verify` sees only uncommitted work, so on a committed branch it checked nothing.
+- **Severity names** in the `review` skill changed from blocking/important/minor to `blocking`/`should-fix`/`nit`, to match the agent's contract.
+- **Detection now reads a parent `Cargo.toml`** for Rust workspace members. Until now it read root-level files only. The read is bounded: the walk stops at the first `[workspace]` manifest or the filesystem root, and files are only read.
+
+**Known gaps**
+- Agent prompts can only be tested for structure (frontmatter, fields, tools, contract markers, references), not behaviour. Whether the reviewer verifies findings or the test-writer leaves production code alone is checked only by dogfooding (step 6).
+- The reviewer's "read-only" is partly enforced and partly instruction. The tool list removes Edit, Write and NotebookEdit, but `Bash` can still write files or run `git commit`. Only its prompt forbids that (plus the harness guards, which block destructive commands and protected paths but not ordinary writes). `disallowedTools` can't narrow Bash to read-only commands: per the docs, an entry like `Bash(git push *)` removes the whole tool.
+- The test-writer's "only test files" rule is also instruction-only. Nothing stops an Edit to production code.
+- `cargoTables` is a line-based subset of TOML: no multi-line strings or arrays. That's enough for `edition` and `workspace` keys, but it isn't a TOML parser. A package with no `edition` gets rustfmt 2021, as before, although Cargo's own default for a missing edition is 2015.
+- A workspace member's edition is found only when `harness-init` runs in that member. Running it at the workspace root still proposes one edition for every member.
+
+**Review round 1 (PR #5)**
+- **The reviewer's checks ran on nothing (blocking).** The review skill passes the plugin path, so the reviewer ran `bin/harness.mjs verify`. But `verify` took its files from `git status` only. On a committed branch with a clean tree (the skill's main case, `git diff <base>...HEAD`) it checked 0 files, printed `verify: nothing ran` and exited 0, so the branch's lint, typecheck and related tests never ran. With unrelated uncommitted work, it checked that instead. Fixes:
+  - **`verify --base <ref>`** (also `--base=<ref>`). `changedFiles(root, base?)` in `lib/git.mjs` is now the one changed-file source for the gate, `verify` and `verify --base`. With a base, it adds `git diff --name-status -z --relative <base>...HEAD` to the working-tree changes. Renames give the new path and deletions are marked deleted, so `stageFiles` drops them. The working tree wins for a path in both.
+  - `<base>...HEAD` diffs from the merge base, so commits on the base after the branch point don't count.
+  - Bad input exits 2 with a `verify --base: …` message: a ref starting with `-` (refused before git sees it), an unknown ref, a ref with no common ancestor, a missing or repeated value, and `--all` together with `--base`.
+  - The CLI's flag parser now supports options that take a value (`COMMANDS[sub].options`).
+  - **"nothing ran" can't pass for a pass.** The line now reads `verify: nothing ran (no check executed; not a pass)`. `--help`, the header comment, the README and the `verify` skill state the exit codes: 0 passed or nothing ran, 1 failed, 2 error.
+  - The reviewer agent and the review skill must report "nothing ran" as "no checks executed", never as passing.
+  - **Callers use `--base`.** The reviewer and the review skill run `verify --base <base>` with the diff's base ref, and plain `verify` only for staged or uncommitted-only reviews. The `verify` skill explains `--base` for committed branches. `ship` verifies before committing, so it now runs `verify --base <base branch>`, which checks the branch's earlier commits as well as the work about to be committed.
+  - The sentence in "Changes from the sketch" that claimed the reviewer's `verify` covered the changed files is corrected.
+- **TOML comments** (non-blocking): `stripComment` cuts at the first `#` outside a quoted string, instead of requiring whitespace before it. `edition = "2018"#old` now reads as 2018, and `name = "a#b"` keeps its `#`.
+- Tests:
+  - `test/cli.test.mjs` adds 4 tests:
+    - committed branch, clean tree and a failing `verify.test`: `--base main` and `--base=main` exit 1 and name the stage, while plain `verify` prints nothing ran and exits 0;
+    - `{files}` gets only the branch's files (rename to the new path, deleted file excluded, commits on `main` after the branch point excluded), then the union with working-tree edits, untracked files and an uncommitted deletion;
+    - a project root in a repo subdirectory;
+    - exit 2 for each bad-input case above, plus an orphan-branch base.
+  - `test/skills.test.mjs` now checks every `--flag` that a skill or the reviewer passes to `bin/harness.mjs <sub>` against `COMMANDS`. It also asserts that `review` and `ship` use `verify --base` and explain "nothing ran". `test/detect.test.mjs` adds a `"2018"#old` row.
+- `npm test`: 334/334 passing (327 before this round).
