@@ -1,6 +1,7 @@
 // Deny Edit/Write/MultiEdit/NotebookEdit on config.protectedPaths (.env, keys, .git/...).
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { globToRegExp } from "../../lib/glob.mjs";
 
 const PATH_FIELD = { Edit: "file_path", Write: "file_path", MultiEdit: "file_path", NotebookEdit: "notebook_path" };
 
@@ -32,31 +33,4 @@ export async function guardPaths(input, config) {
 
 function toPosix(p) {
   return sep === "/" ? p : p.split(sep).join("/");
-}
-
-/**
- * Compile a glob to an anchored RegExp. Supports `**` (any number of path
- * segments, as a whole segment), `*` (any run of non-`/` characters), `?`
- * (one non-`/` character). Wildcards match dot-files. Everything else is literal.
- * Matching ignores case, because macOS and Windows filesystems usually do:
- * `.ENV` is the same file as `.env` there.
- * @param {string} glob
- */
-function globToRegExp(glob) {
-  const segments = glob.split("/");
-  let re = "";
-  segments.forEach((seg, i) => {
-    const last = i === segments.length - 1;
-    if (seg === "**") {
-      re += last ? ".*" : "(?:[^/]*/)*";
-      return;
-    }
-    for (const c of seg) {
-      if (c === "*") re += "[^/]*";
-      else if (c === "?") re += "[^/]";
-      else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
-    if (!last) re += "/";
-  });
-  return new RegExp(`^${re}$`, "i");
 }

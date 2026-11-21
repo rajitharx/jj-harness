@@ -1,0 +1,257 @@
+#!/usr/bin/env node
+// The harness CLI: the small surface the skills call.
+//   init [--write] [--force-config]   propose (or write) config, CLAUDE.md, AGENTS.md, progress.md
+//   verify [--all]                    run lint, typecheck and test on the changed files
+// Exit codes: 0 ok, 1 checks failed or init refused, 2 usage, config or git error.
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { CONFIG_PATH, ConfigError, PROGRESS_PATH, defaultConfig, loadConfig, validateConfig } from "../lib/config.mjs";
+import { detectProject } from "../lib/detect.mjs";
+import { changedFiles, trackedFiles } from "../lib/git.mjs";
+import { CHECK_STAGES, runStage, stageFiles, tail } from "../lib/verify.mjs";
+
+const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const MARK_START = "<!-- harness:start -->";
+const MARK_END = "<!-- harness:end -->";
+const OUTPUT_TAIL = 4000;
+
+/** Subcommands: their flags and implementation. skills.test.mjs reads the names from here. */
+export const COMMANDS = {
+  init: { flags: ["--write", "--force-config"], run: init },
+  verify: { flags: ["--all"], run: verify },
+};
+export const SUBCOMMANDS = Object.keys(COMMANDS);
+
+const USAGE = `usage: harness.mjs <command> [flags]
+  init [--write] [--force-config]  detect the stack and propose .harness/config.json (dry run);
+                                   --write creates it plus CLAUDE.md, AGENTS.md and .harness/progress.md
+  verify [--all]                   run lint, typecheck and test on the changed files (--all: every tracked file)`;
+
+/**
+ * Run the CLI. Returns the exit code instead of exiting, so tests can call it.
+ * @param {string[]} argv  Arguments after the script name.
+ * @param {{ cwd?: string, out?: (s: string) => void, err?: (s: string) => void }} [io]
+ * @returns {Promise<number>}
+ */
+export async function main(argv, { cwd = process.cwd(), out = (s) => process.stdout.write(s), err = (s) => process.stderr.write(s) } = {}) {
+  const [name, ...rest] = argv;
+  if (name === "--help" || name === "-h" || name === "help") {
+    out(`${USAGE}\n`);
+    return 0;
+  }
+  const command = Object.hasOwn(COMMANDS, name ?? "") ? COMMANDS[name] : undefined;
+  if (!command) {
+    err(`${name ? `unknown command: ${name}\n` : ""}${USAGE}\n`);
+    return 2;
+  }
+  const unknown = rest.filter((a) => !command.flags.includes(a));
+  if (unknown.length) {
+    err(`${name}: unknown argument ${unknown.join(" ")}\n${USAGE}\n`);
+    return 2;
+  }
+  const flags = new Set(rest);
+  try {
+    return await command.run(flags, { cwd, out, err });
+  } catch (e) {
+    err(`harness ${name}: ${e?.message ?? e}\n`);
+    return 2;
+  }
+}
+
+// ---------------------------------------------------------------- init
+
+async function init(flags, { cwd, out, err }) {
+  const write = flags.has("--write");
+  const force = flags.has("--force-config");
+  const root = projectRoot(cwd);
+  const detection = detectProject(root);
+  const proposal = { ...readTemplateConfig(), verify: detection.verify };
+  validateConfig(proposal, "proposed config");
+
+  const changes = planInit(root, proposal, force);
+  const refused = changes.filter((c) => c.action === "refused");
+
+  if (!write) {
+    const summary = changes.map(({ path, action, why }) => ({ path, action: dryAction(action), ...(why ? { why } : {}) }));
+    out(`${JSON.stringify({ root, stacks: detection.stacks, config: proposal, notes: detection.notes, changes: summary }, null, 2)}\n`);
+    return 0;
+  }
+  if (refused.length) {
+    for (const c of refused) err(`refused  ${c.path}: ${c.why}\n`);
+    err("Nothing was written.\n");
+    return 1;
+  }
+  for (const c of changes) {
+    if (c.text === undefined) continue;
+    mkdirSync(dirname(join(root, c.path)), { recursive: true });
+    writeFileSync(join(root, c.path), c.text);
+  }
+  for (const c of changes) out(`${c.action.padEnd(10)}${c.path}${c.why ? ` (${c.why})` : ""}\n`);
+  if (detection.notes.length) out(`\nNotes:\n${detection.notes.map((n) => `- ${n}`).join("\n")}\n`);
+  return 0;
+}
+
+/** What --write would do, phrased for the dry run. */
+function dryAction(action) {
+  return { created: "would create", updated: "would update", replaced: "would replace", kept: "would keep" }[action] ?? action;
+}
+
+/**
+ * Decide every file init touches, without writing. Each change has an action
+ * (created, updated, replaced, unchanged, kept or refused) and, when it
+ * writes, the new text.
+ */
+function planInit(root, proposal, force) {
+  const changes = [];
+  const configText = `${JSON.stringify(proposal, null, 2)}\n`;
+  const configFile = join(root, CONFIG_PATH);
+  let verify = proposal.verify;
+  if (!existsSync(configFile)) changes.push({ path: CONFIG_PATH, action: "created", text: configText });
+  else if (readFileSync(configFile, "utf8") === configText) changes.push({ path: CONFIG_PATH, action: "unchanged" });
+  else if (force) changes.push({ path: CONFIG_PATH, action: "replaced", text: configText });
+  else {
+    // Keep the user's config, and describe it (not the proposal) in CLAUDE.md.
+    try {
+      verify = loadConfig(root).verify;
+      changes.push({ path: CONFIG_PATH, action: "kept", why: "exists and differs from the proposal; pass --force-config to replace it" });
+    } catch (e) {
+      if (!(e instanceof ConfigError)) throw e;
+      changes.push({ path: CONFIG_PATH, action: "refused", why: `the existing file is invalid (${e.message}); fix it or pass --force-config` });
+    }
+  }
+
+  const claude = renderClaudeMd(root, verify);
+  changes.push(mergeFile(root, "CLAUDE.md", claude, blockOf(claude)));
+  const agentsBlock = [
+    MARK_START,
+    "Instructions for coding agents in this repository live in [CLAUDE.md](CLAUDE.md): read it first. It has the verify commands, the working rules and the project notes.",
+    MARK_END,
+  ].join("\n");
+  changes.push(mergeFile(root, "AGENTS.md", `# AGENTS.md\n\n${agentsBlock}\n`, agentsBlock));
+
+  if (existsSync(join(root, PROGRESS_PATH))) changes.push({ path: PROGRESS_PATH, action: "unchanged" });
+  else {
+    const text = "# Progress\n\nSession notes, newest last. The `handoff` skill appends entries; the harness shows the last 40 lines at session start.\n";
+    changes.push({ path: PROGRESS_PATH, action: "created", text });
+  }
+  return changes;
+}
+
+/**
+ * Create `path` with `fresh`, or merge `block` into the existing file: replace
+ * the text between the harness markers, or append the block when there are
+ * none. Everything outside the markers is kept byte for byte.
+ */
+function mergeFile(root, path, fresh, block) {
+  const file = join(root, path);
+  if (!existsSync(file)) return { path, action: "created", text: fresh };
+  const existing = readFileSync(file, "utf8");
+  const starts = existing.split(MARK_START).length - 1;
+  const ends = existing.split(MARK_END).length - 1;
+  if (starts === 0 && ends === 0) {
+    const sep = existing === "" ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
+    return { path, action: "updated", text: `${existing}${sep}${block}\n`, why: "appended the harness block" };
+  }
+  const s = existing.indexOf(MARK_START);
+  const e = existing.indexOf(MARK_END);
+  if (starts !== 1 || ends !== 1 || e < s) {
+    return { path, action: "refused", why: `needs exactly one ${MARK_START} followed by one ${MARK_END}; fix the markers by hand` };
+  }
+  const text = existing.slice(0, s) + block + existing.slice(e + MARK_END.length);
+  return text === existing ? { path, action: "unchanged" } : { path, action: "updated", text, why: "replaced the harness block" };
+}
+
+function blockOf(text) {
+  return text.slice(text.indexOf(MARK_START), text.indexOf(MARK_END) + MARK_END.length);
+}
+
+function renderClaudeMd(root, verify) {
+  const template = readFileSync(join(PLUGIN_ROOT, "templates", "CLAUDE.md"), "utf8");
+  const values = { project_name: basename(root) };
+  for (const stage of ["format", "lint", "typecheck", "test"]) values[`verify.${stage}`] = describeCommand(verify[stage]);
+  return template.replace(/\{\{([\w.]+)\}\}/g, (m, key) => values[key] ?? m);
+}
+
+/** One command as markdown: `run`, its filter abbreviated, or "not configured". */
+function describeCommand(entry) {
+  if (!entry) return "not configured";
+  const { run, files } = typeof entry === "string" ? { run: entry } : entry;
+  if (!files) return `\`${run}\``;
+  const shown = files.slice(0, 3).map((g) => `\`${g}\``).join(", ");
+  return `\`${run}\` (only for ${shown}${files.length > 3 ? `, … ${files.length - 3} more` : ""})`;
+}
+
+function readTemplateConfig() {
+  return JSON.parse(readFileSync(join(PLUGIN_ROOT, "templates", "config.json"), "utf8"));
+}
+
+/** The project root for `cwd`, even when its config is invalid (init may replace it). */
+function projectRoot(cwd) {
+  try {
+    return loadConfig(cwd).root;
+  } catch (e) {
+    if (!(e instanceof ConfigError)) throw e;
+    return defaultConfig(cwd).root;
+  }
+}
+
+// ---------------------------------------------------------------- verify
+
+async function verify(flags, { cwd, out, err }) {
+  let config;
+  try {
+    config = loadConfig(cwd);
+  } catch (e) {
+    if (!(e instanceof ConfigError)) throw e;
+    err(`${e.message}\n`);
+    return 2;
+  }
+  const all = flags.has("--all");
+  let files;
+  try {
+    const changed = changedFiles(config.root);
+    if (all) {
+      const tracked = trackedFiles(config.root).map((path) => ({ path, deleted: !existsSync(join(config.root, path)) }));
+      files = [...new Set(stageFiles([...tracked, ...changed]))].sort();
+    } else {
+      files = stageFiles(changed);
+    }
+  } catch (e) {
+    err(`could not list files with git in ${config.root}: ${String(e?.message ?? e).split("\n")[0]}\n`);
+    return 2;
+  }
+
+  out(`verify: ${files.length} ${all ? "files (--all: every tracked file)" : "changed files"} in ${config.root}\n`);
+  const failed = [];
+  let ran = 0;
+  for (const stage of CHECK_STAGES) {
+    if (!config.verify[stage]) {
+      out(`skipped  ${stage} (no command configured)\n`);
+      continue;
+    }
+    const r = await runStage(stage, config, files);
+    if (!r.skipped) ran++;
+    if (r.skipped) out(`skipped  ${stage} (no matching ${all ? "" : "changed "}files)\n`);
+    else if (r.ok) out(`ok       ${stage}: ${r.command}\n`);
+    else {
+      failed.push(stage);
+      const why = r.timedOut ? `timed out after ${config.stopGate.timeoutSec}s` : r.exitCode === null ? "could not run" : `exit ${r.exitCode}`;
+      out(`FAILED   ${stage}: ${r.command} (${why})\n${tail(r.output, OUTPUT_TAIL) || "(no output)"}\n`);
+    }
+  }
+  out(failed.length ? `verify: failed (${failed.join(", ")})\n` : ran ? "verify: passed\n" : "verify: nothing ran\n");
+  return failed.length ? 1 : 0;
+}
+
+// ---------------------------------------------------------------- entry
+
+if (isEntryPoint()) process.exitCode = await main(process.argv.slice(2));
+
+function isEntryPoint() {
+  try {
+    return realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}

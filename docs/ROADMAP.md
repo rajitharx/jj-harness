@@ -10,7 +10,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 1 | Core runtime: config and hook dispatch | ✅ |
 | 2 | Guardrails | ✅ |
 | 3 | Quality loop | ✅ |
-| 4 | Workflow skills | ⬜ |
+| 4 | Workflow skills | ✅ |
 | 5 | Agents | ⬜ |
 | 6 | Dogfood and release | ⬜ |
 
@@ -45,15 +45,18 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - [x] Hook timeouts in `hooks.json`: Stop 900 s, PostToolUse 60 s
 - [x] Tests for each policy against real temp git repos, including the loop guard, fingerprint, per-session attempts, timeouts and fail-open paths
 
-## 4. Workflow skills ⬜
+## 4. Workflow skills ✅
 
-- [ ] `harness-init`: detect the stack, propose verify commands and test that they run, write the config, `CLAUDE.md`, `AGENTS.md` and `progress.md`; never overwrite an existing `CLAUDE.md`
-- [ ] `harness-init` generates `{files}`-based related-test commands per stack, so the Stop gate checks only related tests: `jest --findRelatedTests {files}`, `vitest related --run {files}`, `go test` on the changed packages, pytest on matching test files, plus per-file lint (`eslint {files}`, `ruff check {files}`). Commands must tolerate non-source paths in `{files}` (e.g. eslint's `--no-warn-ignored`)
-- [ ] `plan`: write `.harness/plans/<slug>.md`
-- [ ] `verify`: run the checks and report the output exactly
-- [ ] `review`: send the diff to the `reviewer` agent and check each finding
-- [ ] `ship`: refuse on main, verify, write a conventional commit, open a PR
-- [ ] `handoff`: append a progress note
+- [x] Per-command file filters: a `verify.*` entry is a string or `{ "run": "<cmd>", "files": ["**/*.ts"] }`, validated and normalized to one shape in `lib/config.mjs`. `runStage` narrows the changed files to the filter before substitution and skips the stage when none match; a `{dirs}` placeholder gives the changed files' directories (`.` or `./dir`). The glob matcher moved to `lib/glob.mjs`, shared with `guard-paths`
+- [x] `lib/detect.mjs`: `detectProject(root)` proposes related-only, file-filtered commands per stack, so the Stop gate checks only related tests: node (npm/pnpm/yarn/bun; `vitest related`, `jest --findRelatedTests`, `node --test {files}`; eslint `--no-warn-ignored` or biome; prettier or biome format; `tsc --noEmit`), python (uv/poetry; `pytest --testmon` or `pytest {files}` on test files; `ruff check`/`ruff format`; mypy or pyright), go (`go test {dirs}`, `go vet {dirs}`, `gofmt -w`, golangci-lint), rust (`rustfmt --edition …`, `cargo clippy`, `cargo check`, no test command). Strict tools never see docs or config files
+- [x] `bin/harness.mjs`: `init [--write] [--force-config]` (dry-run JSON proposal; writes the config, a marker block in `CLAUDE.md`/`AGENTS.md`, and `progress.md`; idempotent; never overwrites user content) and `verify [--all]` (lint, typecheck, test through `runStage` on the changed files)
+- [x] `harness-init`: dry run, try each command once, ask about the notes, `init --write`, remind to commit
+- [x] `plan`: explore, write `.harness/plans/<yyyy-mm-dd>-<slug>.md` (Goal, Constraints, Steps with verification, Risks, Out of scope), stop for approval
+- [x] `verify`: run `bin/harness.mjs verify` and report the output exactly
+- [x] `review`: send the diff to the `harness:reviewer` agent, verify each finding, rank by severity
+- [x] `ship`: refuse on main/master, verify, stage by path but never protected files, conventional commit, push, `gh pr create` with the repo's template; never force-push or merge
+- [x] `handoff`: append a short dated progress entry (Done, In progress, Next, Open questions, Gotchas)
+- [x] Tests: `test/glob.test.mjs`, `test/detect.test.mjs`, `test/cli.test.mjs`, `test/skills.test.mjs`, plus filter and `{dirs}` cases in the verify, config, gate and session-context tests
 
 ## 5. Agents ⬜
 
@@ -188,7 +191,69 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - "Changed files" includes edits the user made before the session, and anything else uncommitted, so the gate can block on someone else's work in progress.
 - A change committed mid-turn no longer counts as changed, so the gate doesn't check it.
 - The fingerprint uses mtime and size, so a change that keeps both (rare, e.g. a tool that restores mtimes) isn't noticed, and a `touch` without a content change triggers a re-run.
-- Related-test quality depends on the tool. `vitest related` and `jest --findRelatedTests` follow imports; other stacks need approximations (step 4). `{files}` lists every changed file, including docs and config, so commands must tolerate non-source paths.
+- Related-test quality depends on the tool. `vitest related` and `jest --findRelatedTests` follow imports; other stacks need approximations (step 4). ~~`{files}` lists every changed file, including docs and config, so commands must tolerate non-source paths.~~ Resolved in step 4: a command's `files` filter keeps docs and config files away from strict tools, and `harness-init` proposes filters for every stack.
 - The overall 840 s deadline keeps the gate inside the 900 s hook timeout, and SIGTERM/SIGINT/SIGHUP to the hook kill the running stage's process group. A SIGKILL to the hook can't be caught, though, so a stage would then outlive it.
 - If the state file can't be written, the gate never blocks: it fails open rather than risk an unbounded loop. The checks still run and the failure is logged to stderr.
 - Quoting is POSIX-shell quoting. On Windows (`cmd.exe`), file names with spaces or quotes may not survive.
+
+### Step 4: Workflow skills (2026-11-21)
+
+**Shipped**
+- **File filters and `{dirs}`** (`lib/verify.mjs`, `lib/config.mjs`). A `verify.*` entry is a string or `{ "run", "files" }`. `lib/config.mjs` validates both (only `run` and `files` keys; `run` a string; `files` a non-empty array of non-empty globs) and normalizes every entry to `{ run, files? }`, so `runStage` and the policies see one form. `buildCommand` narrows the changed files to the filter, then substitutes `{files}` (quoted paths) and `{dirs}` (unique parent directories, `.` for the root and `./dir` otherwise, quoted) in one pass, so a file name containing `{dirs}` is never substituted twice. A placeholder command with no matches is skipped, as is `format` with no matches and a whole-project command whose filter matches nothing. `stageFiles(changed)` (drop deleted and `.harness/` files) and `CHECK_STAGES` moved here so the gate and the CLI share them. `session-context` prints each command's filter.
+- **`lib/glob.mjs`**: the glob-to-RegExp compiler from `guard-paths`, unchanged in behaviour (`**`, `*`, `?`, dot-files, case-insensitive), plus a compiled-pattern cache and `matchGlob(path, globs)`.
+- **`lib/detect.mjs`**: `detectProject(root) → { stacks, verify, notes }`. It reads root-level files only; no network, no commands.
+  - Node: the package manager from the lockfile (pnpm → `pnpm exec`, yarn → `yarn`, bun → `bunx --no-install`, else `npx --no --`; see review round 1). Tools come from `dependencies`/`devDependencies`, config files and `scripts`. Test: vitest, then jest, then `node --test {files}` on node's default test-file patterns (with a note), else no test command and a note. Lint: eslint (`--no-warn-ignored` with a flat config; left out, with a note, for a legacy `.eslintrc` only), else biome. Format: prettier (`--write --ignore-unknown`), else biome. Typecheck: `tsc --noEmit` when `tsconfig.json` exists. Workspaces get a note.
+  - Python: runner from `uv.lock`/`poetry.lock`. `pytest --testmon` when pytest-testmon is a dependency, else `pytest {files}` on `**/test_*.py`/`**/*_test.py` with a note. `ruff check --force-exclude {files}` and `ruff format --force-exclude`. mypy (`mypy .`) or pyright when configured. Dependencies are matched as whole names, so `pytest-cov` isn't `pytest-testmon`.
+  - Go: `go test {dirs}`, `go vet {dirs}` (typecheck), `gofmt -w`, `golangci-lint run {dirs}` when `.golangci.*` exists, all filtered to `**/*.go`.
+  - Rust: `rustfmt --edition <edition from Cargo.toml, default 2021>` (review round 1), `cargo clippy`, `cargo check`, filtered to `.rs`/`Cargo.toml`/`Cargo.lock`; no test command, and a note to ask the user.
+  - **Several stacks:** the primary stack is the first, in the order node, python, go, rust, that yields any command. The others are listed in `notes` with the commands they would use. They aren't merged because one verify entry has one command and one filter, so it can't say "eslint on `.ts`, ruff on `.py`".
+- **`bin/harness.mjs`** (new public surface; exports `COMMANDS`, `SUBCOMMANDS` and `main`):
+  - `init`: prints `{ root, stacks, config, notes, changes }` as JSON and writes nothing. `init --write` creates `.harness/config.json` (`templates/config.json` with the detected `verify`). An existing config is left alone (`kept`), and the `CLAUDE.md` block then describes that config; `--force-config` replaces it. It creates `CLAUDE.md` from `templates/CLAUDE.md`, or inserts/replaces only the `<!-- harness:start -->`…`<!-- harness:end -->` block in an existing one, keeping everything outside byte for byte. It does the same for an `AGENTS.md` pointer to `CLAUDE.md`, and creates `.harness/progress.md` if it is missing. It plans every change first and writes nothing if any file is `refused` (broken markers, or an invalid existing config without `--force-config`). Re-running it reports `unchanged`.
+  - `verify [--all]`: runs lint, typecheck and test through `runStage` on `stageFiles(changedFiles(root))`, or with `--all`, on every tracked file that still exists plus untracked new files. It prints `ok`, `FAILED` with a 4 KB tail, or `skipped` with the reason for each stage, then `passed`, `failed (…)` or `nothing ran`. Exit codes: 0, 1 on a failed check, 2 on a usage, config or git error.
+- **Skills**: all six rewritten as real instructions (see the checklist). `harness-init`, `verify` and `ship` call `node "<skill base dir>/../../bin/harness.mjs" …` and say that the base directory is given at load time.
+- **Templates**: `templates/CLAUDE.md` has the harness section between markers, with `{{verify.*}}` filled with each command and its filter, or "not configured".
+- `PROGRESS_PATH` is now exported from `lib/config.mjs`, so session-context and the CLI share it.
+
+**Verified:** `npm test` gives 306/306 passing (246 before this step), in about 7 s. New tests:
+- `test/glob.test.mjs`: a semantics table.
+- `test/detect.test.mjs`: 17 fixture projects built in temp dirs. They cover npm, pnpm, yarn and bun; vitest, jest and node:test; flat and legacy eslint; biome; prettier; tsc; uv, poetry and pip with pytest, testmon, ruff, mypy and pyright; go with and without golangci; rust; two multi-stack cases; an invalid `package.json`; and no stack. Every proposal must pass `validateConfig`, no test command may be full-suite, and the filters are checked.
+- `test/cli.test.mjs`: spawns the CLI against temp git repos. Cases: the dry run writes nothing; `--write` is idempotent; marker-block merging into an existing CRLF `CLAUDE.md` with no trailing newline, keeping the bytes before and after the block; refusing broken markers; keeping or `--force-config`-replacing an existing config; an invalid existing config; `verify` exit codes 0, 1 and 2; filters; `nothing ran`; and `--all`.
+- `test/skills.test.mjs`: every skill directory has a `SKILL.md` whose frontmatter `name` matches and whose `description` is real, and there's no stub text. Every `bin/harness.mjs <sub>` a skill mentions must be in the CLI's `SUBCOMMANDS`. `ship` must list every default protected path, taken from `defaultConfig`.
+- Filter and `{dirs}` tables in `test/verify.test.mjs`; object-form accept and reject cases in `test/config.test.mjs`; a gate test showing that a docs-only change never reaches filtered stages; and session-context filter output.
+
+**Changes from the sketch**
+- **Object form of `verify` entries.** This wasn't in the step 3 sketch; it's what makes `{files}` safe in real projects. Strings still work and mean "no filter".
+- **A filter on a whole-project command** (no placeholder) also gates it: `tsc --noEmit` with a `.ts` filter doesn't run when only docs changed. The brief only required skipping placeholder commands.
+- **`{dirs}`** uses `.` for the root directory instead of `./`, which `go test` accepts reliably.
+- **`lib/glob.mjs`**, `lib/detect.mjs` and `bin/harness.mjs` are new modules. `buildCommand` now takes the normalized entry instead of a string.
+- **Monorepos**: first stack with commands, others in notes (not merged), for the reason above.
+- **Small safety additions to the commands in the brief**: `npx --no --` (never download a missing tool from inside the gate; the `--` was added in review round 1), `--passWithNoTests`, `--ignore-unknown` for prettier, `--no-errors-on-unmatched` for biome, and `--force-exclude` for ruff (otherwise excluded files passed by name get linted).
+- **`init --write` with an existing, different config keeps it** and still writes the other files, instead of failing. That makes "edit the config, re-run init to refresh the `CLAUDE.md` block" work, and keeps re-runs idempotent. It refuses (writing nothing) only when the existing config is invalid or the markers are broken.
+- **`verify` runs every stage** and reports each one, rather than stopping at the first failure like the gate does. `--all` also includes untracked new files.
+- `templates/CLAUDE.md` puts the harness section inside markers, so the same block can be merged into an existing `CLAUDE.md`.
+
+**Known gaps**
+- pytest without pytest-testmon runs only changed test files, not the tests of changed source files. The same applies to `node --test`. `go test {dirs}` doesn't test packages that import a changed package.
+- Rust has no related-test mode, so no test command is proposed. The user has to choose one, and `cargo test` would run the whole suite on every stop.
+- Detection reads the root directory only. In a monorepo it doesn't look into workspace packages, and only one stack's commands are proposed.
+- `mypy .` checks the whole tree, which can be slow or pick up vendored code. The skill's "try each command" step is where that gets noticed.
+- Skills can't be unit-tested beyond their structure (frontmatter, CLI subcommands, the protected-path list). Whether an agent follows them is checked only by dogfooding (step 6).
+- `review` depends on the `reviewer` agent, which is still a stub until step 5.
+- `verify --all` passes every tracked file on one command line. A very large repo can hit the OS argument limit.
+- File filters match case-insensitively, like `protectedPaths`, so `**/*.ts` also matches `A.TS`.
+- `bunx --no-install` is taken from the Bun docs (`bunx [flags] <package> [args]`). It isn't executed in the tests, because Bun isn't installed where they run.
+- rustfmt also formats the out-of-line modules that the edited file declares (`mod x;`), so editing `lib.rs` still reformats most of the crate. In a workspace, the edition comes from the root `Cargo.toml`, so a member with a different edition needs its own `rustfmt.toml`.
+- `ship` lists the default protected paths in its text. `test/skills.test.mjs` keeps that list in sync with `lib/config.mjs`, but the skill can't read the merged list from the CLI.
+
+**Review round 1 (PR #4)**
+- **npx swallowed the tools' flags (blocking).** npm reads `--no` as an option that takes a value, so `npx --no tsc --noEmit` passed `--noEmit` to npm. On npm 11.12.1 that meant:
+  - `tsc` emitted `.js` files into the user's tree while the gate reported ok
+  - `prettier --write` printed the result instead of writing it
+  - `jest --findRelatedTests --passWithNoTests` became plain `jest <paths>`
+  - eslint lost `--no-warn-ignored`
+
+  Detection now generates `npx --no -- <tool> …`. A new test in `test/detect.test.mjs` puts stub `tsc`, `jest`, `vitest`, `eslint` and `prettier` binaries in a temp project's `node_modules/.bin` (each prints its argv as JSON). It generates the config with `detectProject`, runs typecheck, test, lint and format through `runStage` and real `npx`, and asserts that each stub got every flag. The test is skipped when `npx` isn't on PATH. It fails with the old `npx --no` form. The README example and the expected strings are updated.
+- `init --write` output: the action column is padded to 10 characters, so `unchanged` no longer runs into the path (`unchanged.harness/config.json`). There's an assertion for it.
+- Bun: `bunx --no-install` (from the Bun docs: flags go before the package name), so the gate never downloads a missing tool.
+- Rust format: `rustfmt --edition <edition>` on the edited file instead of `cargo fmt -- <file>`, which reformatted the whole crate. The edition is read from `Cargo.toml` (default 2021), and a new fixture case covers that.
+- `npm test`: 308/308 passing (306 before this round).

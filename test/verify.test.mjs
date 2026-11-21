@@ -4,8 +4,10 @@ import { loadConfig } from "../lib/config.mjs";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildCommand, pathArg, runStage, shellQuote } from "../lib/verify.mjs";
+import { buildCommand, pathArg, runStage, shellQuote, stageFiles } from "../lib/verify.mjs";
 import { makeProject, writeFile } from "./helpers.mjs";
+
+const cmd = (run) => (run === undefined ? undefined : { run });
 
 // Prints its arguments as JSON, so tests see exactly what the shell passed.
 const ARGV_SCRIPT = "console.log(JSON.stringify(process.argv.slice(2)))";
@@ -31,8 +33,45 @@ test("buildCommand: placeholder, appending and skipping", () => {
     ["test", undefined, ["a"], null],
   ];
   for (const [name, command, files, expected] of cases) {
-    assert.equal(buildCommand(name, command, files), expected, `${name}: ${command} ${JSON.stringify(files)}`);
+    assert.equal(buildCommand(name, cmd(command), files), expected, `${name}: ${command} ${JSON.stringify(files)}`);
   }
+});
+
+test("buildCommand: file filters and {dirs}", () => {
+  const TS = ["**/*.ts", "**/*.tsx"];
+  const cases = [
+    // [name, entry, files, expected]
+    ["lint", { run: "eslint {files}", files: TS }, ["README.md", "src/a.ts", "b.tsx", "x.json"], "eslint src/a.ts b.tsx"],
+    ["lint", { run: "eslint {files}", files: TS }, ["README.md", "package.json"], null],
+    ["test", { run: "pytest {files}", files: ["**/test_*.py", "**/*_test.py"] }, ["app/x.py", "tests/test_x.py", "y_test.py"], "pytest tests/test_x.py y_test.py"],
+    ["test", { run: "go test {dirs}", files: ["**/*.go"] }, ["main.go", "pkg/a/a.go", "pkg/a/b.go", "pkg/b/c.go", "go.mod"], "go test . ./pkg/a ./pkg/b"],
+    ["test", { run: "go test {dirs}" }, ["-x/a.go"], "go test ./-x"],
+    ["test", { run: "go test {dirs}" }, ["my dir/a.go"], "go test './my dir'"],
+    ["test", { run: "go vet {dirs} && echo {files}", files: ["**/*.go"] }, ["a/x.go"], "go vet ./a && echo a/x.go"],
+    ["test", { run: "go test {dirs}", files: ["**/*.go"] }, ["README.md"], null],
+    ["test", { run: "go test {dirs}" }, [], null],
+    // A file name holding a placeholder is not substituted a second time.
+    ["lint", { run: "x {files} {dirs}" }, ["a{dirs}.ts"], "x 'a{dirs}.ts' ."],
+    ["format", { run: "gofmt -w", files: ["**/*.go"] }, ["a.go", "b.md"], "gofmt -w a.go"],
+    ["format", { run: "gofmt -w", files: ["**/*.go"] }, ["b.md"], null],
+    // A whole-project command with a filter runs only when a matching file changed.
+    ["typecheck", { run: "tsc --noEmit", files: TS }, ["a.ts"], "tsc --noEmit"],
+    ["typecheck", { run: "tsc --noEmit", files: TS }, ["README.md"], null],
+    ["typecheck", { run: "tsc --noEmit" }, [], "tsc --noEmit"],
+  ];
+  for (const [name, entry, files, expected] of cases) {
+    assert.equal(buildCommand(name, entry, files), expected, `${name}: ${JSON.stringify(entry)} ${JSON.stringify(files)}`);
+  }
+});
+
+test("stageFiles drops deleted and .harness/ files", () => {
+  const changed = [
+    { path: ".harness/config.json", deleted: false },
+    { path: "a.ts", deleted: false },
+    { path: "gone.ts", deleted: true },
+    { path: "src/b.ts", deleted: false },
+  ];
+  assert.deepEqual(stageFiles(changed), ["a.ts", "src/b.ts"]);
 });
 
 test("shellQuote leaves plain paths alone and quotes the rest", () => {
@@ -62,8 +101,8 @@ test("pathArg keeps a leading '-' from reading as an option, combined with quoti
     ["my file.ts", "'my file.ts'"],
   ];
   for (const [input, expected] of cases) assert.equal(pathArg(input), expected, input);
-  assert.equal(buildCommand("lint", "eslint {files}", ["-rf", "--config=evil.js"]), "eslint ./-rf ./--config=evil.js");
-  assert.equal(buildCommand("format", "prettier -w", ["--write=x"]), "prettier -w ./--write=x");
+  assert.equal(buildCommand("lint", cmd("eslint {files}"), ["-rf", "--config=evil.js"]), "eslint ./-rf ./--config=evil.js");
+  assert.equal(buildCommand("format", cmd("prettier -w"), ["--write=x"]), "prettier -w ./--write=x");
 });
 
 test("runStage passes awkward file names to the command intact", async () => {
@@ -95,7 +134,7 @@ test("runStage reports non-zero exits with combined output", async () => {
   assert.equal(r.timedOut, undefined);
   assert.match(r.output, /out/);
   assert.match(r.output, /err/);
-  assert.equal(r.command, config.verify.lint);
+  assert.equal(r.command, config.verify.lint.run);
 });
 
 test("runStage runs in the project root with CI=1", async () => {
@@ -137,8 +176,8 @@ test("runStage defaults to formatTimeoutSec for format and stopGate.timeoutSec o
 test("killing the hook process with SIGTERM also kills the running stage's process group", async () => {
   const root = makeProject();
   // The stage records its shell's pid and a background grandchild's pid, then waits.
-  const cmd = "sleep 30 & echo $! > grandchild.pid; echo $$ > stage.pid; wait";
-  const config = { root, verify: { test: cmd }, stopGate: { timeoutSec: 60 }, formatTimeoutSec: 30 };
+  const stage = "sleep 30 & echo $! > grandchild.pid; echo $$ > stage.pid; wait";
+  const config = { root, verify: { test: { run: stage } }, stopGate: { timeoutSec: 60 }, formatTimeoutSec: 30 };
   const verifyUrl = new URL("../lib/verify.mjs", import.meta.url).href;
   const script = `const { runStage } = await import(${JSON.stringify(verifyUrl)}); await runStage("test", ${JSON.stringify(config)}, []);`;
   const parent = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: "ignore" });

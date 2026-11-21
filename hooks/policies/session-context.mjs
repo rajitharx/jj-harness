@@ -2,11 +2,10 @@
 // .harness/progress.md as a compact context block (about 2 KB at most).
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CONFIG_PATH } from "../../lib/config.mjs";
+import { CONFIG_PATH, PROGRESS_PATH } from "../../lib/config.mjs";
 import { changedFiles, currentBranch } from "../../lib/git.mjs";
-import { FILES_PLACEHOLDER } from "../../lib/verify.mjs";
+import { DIRS_PLACEHOLDER, FILES_PLACEHOLDER } from "../../lib/verify.mjs";
 
-const PROGRESS_PATH = join(".harness", "progress.md");
 const MAX_DIRTY_LISTED = 10;
 const PROGRESS_LINES = 40;
 const MAX_PROGRESS_CHARS = 1200;
@@ -32,8 +31,12 @@ export async function sessionContext(input, config) {
 
   const commands = Object.entries(config.verify);
   if (commands.length) {
-    lines.push(`Verify commands (\`${FILES_PLACEHOLDER}\` = only the changed files are checked):`);
-    for (const [name, cmd] of commands) lines.push(`- ${name}: ${cmd}`);
+    lines.push(
+      `Verify commands (\`${FILES_PLACEHOLDER}\`/\`${DIRS_PLACEHOLDER}\` = only the changed files or their directories are checked):`,
+    );
+    for (const [name, cmd] of commands) {
+      lines.push(`- ${name}: ${cmd.run}${cmd.files ? ` (only for ${cmd.files.join(", ")})` : ""}`);
+    }
     if (config.stopGate.enabled) lines.push("lint, typecheck and test re-run before you can stop if files changed.");
   }
 

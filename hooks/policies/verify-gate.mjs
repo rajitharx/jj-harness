@@ -10,9 +10,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { changedFiles } from "../../lib/git.mjs";
-import { runStage, tail } from "../../lib/verify.mjs";
+import { CHECK_STAGES, runStage, stageFiles, tail } from "../../lib/verify.mjs";
 
-const GATE_STAGES = ["lint", "typecheck", "test"];
+const GATE_STAGES = CHECK_STAGES;
 const STATE_DIR = join(".harness", "state");
 const STATE_FILE = "verify-gate.json";
 const OUTPUT_TAIL = 8 * 1024;
@@ -60,8 +60,7 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
     return { kind: "allow" };
   }
 
-  // Harness files (.harness/config.json, progress.md, plans) are never source for lint or tests.
-  const files = changed.filter((f) => !f.deleted && !f.path.startsWith(".harness/")).map((f) => f.path);
+  const files = stageFiles(changed);
   for (const stage of stages) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) return deadlinePassed(stage, log);
