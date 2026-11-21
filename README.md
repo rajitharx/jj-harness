@@ -8,7 +8,7 @@ A reusable agent harness for Claude Code, shipped as a plugin. Install it once a
 - **Workflow skills**: `harness-init`, `plan`, `verify`, `review`, `ship`, `handoff`.
 - **Agents**: `reviewer` (read-only, verified findings only) and `test-writer` (tests in the project's style, related tests only).
 
-Version 0.1.0. See [`CHANGELOG.md`](CHANGELOG.md), the per-step log in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the design in [`docs/design/rationale.md`](docs/design/rationale.md). Needs Node ≥22 on `PATH`; there are no dependencies to install.
+Version 0.1.1. See [`CHANGELOG.md`](CHANGELOG.md), the per-step log in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the design in [`docs/design/rationale.md`](docs/design/rationale.md). Needs Node ≥22 on `PATH`; there are no dependencies to install.
 
 ## Quickstart
 
@@ -19,7 +19,7 @@ From the marketplace:
 /plugin install harness@jj-harness
 ```
 
-The repository is private, so Claude Code clones it with your normal git credentials: an SSH key loaded in `ssh-agent`, or for HTTPS, `gh auth login` plus `gh auth setup-git` (or another credential helper that doesn't prompt). A `GITHUB_TOKEN` in the environment isn't enough on its own; it only works through a credential helper. On a machine with no GitHub SSH key, set `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` so installs and updates from `/plugin` clone over HTTPS instead of failing.
+The repository is private, so Claude Code clones it with your normal git credentials: an SSH key loaded in `ssh-agent`, or for HTTPS, `gh auth login` plus `gh auth setup-git` (or another credential helper that doesn't prompt). A `GITHUB_TOKEN` in the environment isn't enough on its own; it only works through a credential helper. For `owner/repo` sources, Claude Code probes `ssh -T git@github.com` and clones over SSH when that works. When the probe or the SSH clone fails, adding the marketplace falls back to HTTPS, and so does `claude plugin install` from a shell. Installs from `/plugin` inside a session and plugin updates don't fall back, so on a machine with no GitHub SSH key, set `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`. It skips the probe and always clones over HTTPS.
 
 Background auto-update is off by default for this marketplace. Turn it on under `/plugin` → **Marketplaces** → `jj-harness`. It uses the same credentials and never prompts. Without it, update by hand: `/plugin marketplace update jj-harness` in a session, or `claude plugin marketplace update jj-harness` and then `claude plugin update harness@jj-harness` in a shell (restart Claude Code to apply).
 
@@ -103,7 +103,7 @@ How much "related" means depends on the tool: `vitest related` and `jest --findR
 
 ## Hooks
 
-All four events go through one entry point, `hooks/run.mjs <Event>`. It always exits 0 and answers in JSON. A policy that crashes is logged to stderr and treated as "allow".
+All four events go through one entry point, `hooks/run.mjs <Event>`. It always exits 0 and answers in JSON. A policy that crashes is logged to stderr and treated as "allow". Status lines meant for you rather than the agent go in the hook's `systemMessage`; in headless `stream-json` output they arrive as `informational` messages such as `Stop says: harness: …`.
 
 | Event | Policy | What it does |
 | ----- | ------ | ------------ |
@@ -111,7 +111,7 @@ All four events go through one entry point, `hooks/run.mjs <Event>`. It always e
 | PreToolUse (Bash) | `guard-bash` | Denies `rm -rf` on `/`, `~`, `.` and similar; force-push to or deletion of `main`/`master`; downloads piped into a shell; `DROP`/`TRUNCATE` sent to a database client; `mkfs`, `dd of=/dev/…`, `chmod -R /`, fork bombs; and your `blockedCommands`. The reason names a safer alternative. |
 | PreToolUse (Edit, Write, MultiEdit, NotebookEdit) | `guard-paths` | Denies edits matching `protectedPaths`, including `**/` patterns outside the project such as `~/.ssh/id_ed25519`. |
 | PostToolUse (Edit, Write, MultiEdit) | `format-on-edit` | Runs `verify.format` on the edited file. Silent on success. |
-| Stop | `verify-gate` | If the tree differs from `HEAD`, runs lint, typecheck and test in order. The first failure blocks the stop with the command and its output tail. A passing tree is fingerprinted, so stopping again with no new changes runs nothing. After `maxAttempts` blocks the gate gives up for that turn. The whole run has an 840 s budget, below the hook's 900 s timeout. State lives in `.harness/state/`, which ignores itself in git. |
+| Stop | `verify-gate` | If the tree differs from `HEAD`, runs lint, typecheck and test in order. The first failure blocks the stop with the command and its output tail. A pass shows you a line such as `harness: lint ✓ (1 file) typecheck ✓ test skipped`, where a count is the files the stage's command was given after its `files` filter and a whole-project stage has none,, or `no checks ran` when every stage was skipped. A passing tree is fingerprinted, so stopping again with no new changes runs nothing and shows nothing. When the gate allows a stop without a pass (it gave up, ran out of time, or couldn't save its state), it shows you why. After `maxAttempts` blocks the gate gives up for that turn. The whole run has an 840 s budget, below the hook's 900 s timeout. State lives in `.harness/state/`, which ignores itself in git. |
 
 ## Skills and agents
 
@@ -165,8 +165,8 @@ claude plugin validate . # official manifest, skill, agent and hook checks
    ```sh
    claude plugin tag . --dry-run   # prints the tag: harness--v<version>
    claude plugin tag . --push      # creates and pushes it
-   gh release create harness--v0.1.0 --verify-tag --title "harness v0.1.0" --notes-file <changelog excerpt>
+   gh release create harness--v<version> --verify-tag --title "harness v<version>" --notes-file <changelog excerpt>
    ```
 
-   `claude plugin tag` checks that `plugin.json` and the marketplace entry agree and that the tree is clean, then creates the `{name}--v{version}` tag (`harness--v0.1.0`).
+   `claude plugin tag` takes the version from `plugin.json`. It compares it with the marketplace entry's version only when the entry sets one, and ours deliberately doesn't, so `test/release.test.mjs` is what keeps `plugin.json` and `package.json` in step. It refuses a dirty working tree or a tag that already exists (unless `--force`), then creates the `{name}--v{version}` tag (`harness--v0.1.1`).
 5. Users with auto-update on get it in the background. Others run `/plugin marketplace update jj-harness`, or `claude plugin marketplace update jj-harness` and then `claude plugin update harness@jj-harness` (see [Quickstart](#quickstart)).

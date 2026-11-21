@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-21
+
+### Fixed
+
+- **A passing Stop gate was silent.** In the v0.1.0 dogfood run the agent told the user it hadn't run the checks, though the gate had run and passed. The agent's last message is written before Stop fires, so the gate now tells the user directly: a pass shows `harness: lint ✓ (1 file) typecheck ✓ test skipped`. The count is what that stage's command was given after its `files` filter, and a whole-project stage has none, and a run where every stage was skipped shows `harness: no checks ran (…)`, never a pass. A Stop with no new changes since the last pass stays silent.
+- The gate also tells the user when it allows a stop without a pass: it gave up after `stopGate.maxAttempts`, ran out of its overall time budget, couldn't save its attempt counter, or found the counter unreadable on a continuation. These went only to stderr before.
+- README: the release checklist said `claude plugin tag` checks that `plugin.json` and the marketplace entry agree. It compares them only when the entry sets a version, and ours doesn't. The checklist now says what it does check.
+- README: the `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` note overstated it. Adding an `owner/repo` marketplace already falls back to HTTPS when SSH fails; the variable is for `/plugin` installs and plugin updates, which don't fall back.
+- `docs/ROADMAP.md`: the step 6 checklist said all three manifests carry the version. `plugin.json` and `package.json` do; the marketplace entry has none.
+
+### Changed
+
+- Policies can return a fourth verdict, `{ kind: "notice", text }`. `runHook` puts notices in the top-level `systemMessage` (shown to the user, not the model) on every event, joined one per line, capped at 1,000 characters, alongside any block or context. An empty notice is an invalid verdict and fails open.
+
 ## [0.1.0] - 2026-11-21
 
 First release. Steps 0 to 6 of the roadmap.
@@ -24,5 +38,6 @@ First release. Steps 0 to 6 of the roadmap.
 - The marketplace manifest has a description, and `plugin.json` declares that the plugin reaches no network hosts, which clears the `claude plugin validate` warnings for both manifests. The version lives only in `plugin.json` (and `package.json`), not in the marketplace entry.
 - The README's private-repo install notes: they now cover git credentials (an SSH agent key, or `gh auth setup-git`), `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`, auto-update being off by default, and the manual update commands.
 
-[Unreleased]: https://github.com/rajitharx/jj-harness/compare/harness--v0.1.0...HEAD
+[Unreleased]: https://github.com/rajitharx/jj-harness/compare/harness--v0.1.1...HEAD
+[0.1.1]: https://github.com/rajitharx/jj-harness/compare/harness--v0.1.0...harness--v0.1.1
 [0.1.0]: https://github.com/rajitharx/jj-harness/releases/tag/harness--v0.1.0

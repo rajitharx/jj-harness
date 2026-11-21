@@ -69,6 +69,70 @@ test("long reasons and context are capped at 16 KB with a marker", async () => {
   assert.equal((await run("Stop", [block("short")])).output.reason, "short", "short text is untouched");
 });
 
+const note = (text) => () => ({ kind: "notice", text });
+
+test("notice: top-level systemMessage on every event, next to any block or context", async () => {
+  const cases = [
+    ["PreToolUse", [note("n")], { systemMessage: "n" }],
+    ["PostToolUse", [note("n")], { systemMessage: "n" }],
+    ["Stop", [note("harness: test ✓")], { systemMessage: "harness: test ✓" }],
+    ["SessionStart", [note("n")], { systemMessage: "n" }],
+    [
+      "PreToolUse",
+      [block("no rm"), note("n")],
+      {
+        hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "no rm" },
+        systemMessage: "n",
+      },
+    ],
+    [
+      "PreToolUse",
+      [ctx("c"), note("n")],
+      { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: "c" }, systemMessage: "n" },
+    ],
+    [
+      "PostToolUse",
+      [block("b"), ctx("c"), note("n")],
+      { decision: "block", reason: "b", hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: "c" }, systemMessage: "n" },
+    ],
+    ["Stop", [block("tests failed"), note("n")], { decision: "block", reason: "tests failed", systemMessage: "n" }],
+    ["Stop", [ctx("dropped"), note("n")], { systemMessage: "n" }],
+    [
+      "SessionStart",
+      [ctx("branch: main"), note("n")],
+      { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "branch: main" }, systemMessage: "n" },
+    ],
+  ];
+  for (const [event, list, expected] of cases) {
+    assert.deepEqual((await run(event, list)).output, expected, `${event}: ${JSON.stringify(expected)}`);
+  }
+});
+
+test("notice: several are joined one per line in policy order, trimmed, and never reach the agent", async () => {
+  const r = await run("Stop", [note("  first\n"), allow, note("second")]);
+  assert.deepEqual(r.output, { systemMessage: "first\nsecond" });
+  const pre = await run("PreToolUse", [note("for the user"), ctx("for the agent")]);
+  assert.equal(pre.output.hookSpecificOutput.additionalContext, "for the agent");
+});
+
+test("notice: capped at 1000 characters with a marker", async () => {
+  const msg = (await run("Stop", [note("y".repeat(5000))])).output.systemMessage;
+  assert.equal(msg.length, 1000);
+  assert.ok(msg.endsWith("…[truncated]"));
+  const joined = (await run("PostToolUse", [note("a".repeat(600)), note("b".repeat(600))])).output.systemMessage;
+  assert.equal(joined.length, 1000, "the cap applies to the joined text");
+  assert.equal((await run("Stop", [note("short")])).output.systemMessage, "short");
+});
+
+test("fail open: a notice with empty, blank or non-string text is an invalid verdict", async () => {
+  for (const verdict of [{ kind: "notice", text: "" }, { kind: "notice", text: " \n " }, { kind: "notice" }, { kind: "notice", text: 1 }]) {
+    const logs = [];
+    const r = await run("Stop", [() => verdict, note("other policy")], { logs });
+    assert.deepEqual(r.output, { systemMessage: "other policy" }, JSON.stringify(verdict));
+    assert.match(logs[0], /invalid verdict/);
+  }
+});
+
 test("policies receive input and resolved config", async () => {
   const cwd = makeProject({ verify: { test: "npm test" } });
   let seen;
