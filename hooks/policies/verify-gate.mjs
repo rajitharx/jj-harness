@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { changedFiles } from "../../lib/git.mjs";
-import { CHECK_STAGES, runStage, stageFiles, tail } from "../../lib/verify.mjs";
+import { CHECK_STAGES, describeRun, runStage, stageFiles, tail } from "../../lib/verify.mjs";
 
 const GATE_STAGES = CHECK_STAGES;
 const STATE_DIR = join(".harness", "state");
@@ -162,7 +162,7 @@ function blockReason(stage, result, config, attempt) {
   const output = tail(result.output, OUTPUT_TAIL) || "(no output)";
   return [
     `Verify gate: the ${stage} stage failed; it ${why}.`,
-    `Command: ${result.command}`,
+    `Command: ${describeRun(result)}`,
     `Output (last ${OUTPUT_TAIL / 1024} KB):`,
     output,
     "",

@@ -30,13 +30,15 @@ git clone git@github.com:rajitharx/jj-harness.git
 claude --plugin-dir ./jj-harness
 ```
 
+A plugin installed in the middle of a session isn't loaded until you run `/reload-plugins` (or restart Claude Code). Until then `/harness:harness-init` fails with just `Unknown skill: harness:harness-init`.
+
 Then, once per project:
 
 ```
 /harness:harness-init
 ```
 
-`harness-init` detects the stack (Node with npm/pnpm/yarn/bun, Python with uv/poetry/pip, Go, Rust) and proposes verify commands that check only the changed files. It tries each command once, asks about anything it can't decide (Rust has no related-test mode, for example), and then writes:
+`harness-init` detects the stacks (Node with npm/pnpm/yarn/bun, Python with uv/poetry/pip, Go, Rust, .NET) and proposes verify commands that check only the changed files. It looks at the root, at its subdirectories, and one level deeper in `apps/`, `packages/` and `services/`, so a monorepo with no root manifest works: each package gets its own commands, run in its own directory. It lists the packages it found, asks which ones the Stop gate should check, tries each command once, asks about anything it can't decide (Rust has no related-test mode, and `dotnet test` runs the whole suite, for example), and then writes:
 
 - `.harness/config.json`, the only file the harness reads per project. An existing one is kept unless you agree to replace it.
 - `CLAUDE.md` and `AGENTS.md`. If they exist, only the block between `<!-- harness:start -->` and `<!-- harness:end -->` is inserted or updated.
@@ -50,10 +52,10 @@ Commit those four files. Without a config the guards still run with their defaul
 
 | Key | Type | Default | Meaning |
 | --- | ---- | ------- | ------- |
-| `verify.format` | command | none | Runs after each Edit/Write/MultiEdit on the edited file. Without a placeholder, the path is appended. Never blocks; a failure is shown to the agent. |
-| `verify.lint` | command | none | Stop gate stage 1. |
-| `verify.typecheck` | command | none | Stop gate stage 2. |
-| `verify.test` | command | none | Stop gate stage 3. |
+| `verify.format` | command or array | none | Runs after each Edit/Write/MultiEdit on the edited file. Without a placeholder, the path is appended. Never blocks; a failure is shown to the agent. |
+| `verify.lint` | command or array | none | Stop gate stage 1. |
+| `verify.typecheck` | command or array | none | Stop gate stage 2. |
+| `verify.test` | command or array | none | Stop gate stage 3. |
 | `protectedPaths` | globs | see below | Paths the agent may not Edit, Write, MultiEdit or NotebookEdit. Your entries **add to** the defaults; they can't remove them. |
 | `blockedCommands` | regexes | `[]` | Extra Bash commands to deny, on top of the built-in rules. |
 | `stopGate.enabled` | boolean | `true` | Turn the Stop gate off. |
@@ -61,7 +63,7 @@ Commit those four files. Without a config the guards still run with their defaul
 | `stopGate.timeoutSec` | integer ≥1 | `300` | Time limit for each gate stage. |
 | `formatTimeoutSec` | integer ≥1 | `30` | Time limit for `verify.format`. |
 
-A command is a string, or `{ "run": "<command>", "files": ["<glob>", …] }`. An empty string means "not configured". The defaults, as `lib/config.mjs` resolves them (a test keeps this block in sync):
+A command is a string, or `{ "run": "<command>", "files": ["<glob>", …], "cwd": "<directory>" }`. An empty string means "not configured". A stage may also be an array of commands (one per package in a monorepo), run in order; the first failure stops the stage, and the stage's time limit covers the whole array. The defaults, as `lib/config.mjs` resolves them (a test keeps this block in sync):
 
 <!-- config-defaults -->
 ```json
@@ -89,6 +91,20 @@ A TypeScript project's config might look like this:
 }
 ```
 
+A monorepo's config, as `harness-init` writes it for a Vite app plus a .NET backend:
+
+```json
+{
+  "verify": {
+    "typecheck": { "run": "npx --no -- tsc --noEmit", "files": ["**/*.ts", "**/*.tsx", "**/tsconfig*.json"], "cwd": "apps/web" },
+    "test": [
+      { "run": "npx --no -- vitest related --run --passWithNoTests {files}", "files": ["**/*.ts", "**/*.tsx"], "cwd": "apps/web" },
+      { "run": "dotnet test", "files": ["**/*.cs", "**/*.csproj"], "cwd": "apps/backend" }
+    ]
+  }
+}
+```
+
 ## Related tests only
 
 The Stop gate checks what changed, never the whole suite:
@@ -96,6 +112,7 @@ The Stop gate checks what changed, never the whole suite:
 - **`{files}`** is replaced with the shell-quoted, root-relative paths of the files that differ from `HEAD`: modified, added, renamed and untracked. Deleted files and `.harness/` are left out. Use it for related-test and per-file lint commands, such as `vitest related --run {files}` or `jest --findRelatedTests {files}`.
 - **`{dirs}`** is replaced with the unique directories of those files (`.` or `./pkg/x`), for per-package tools such as `go test {dirs}`.
 - **`files`** narrows the changed files to the matching globs (`**`, `*`, `?`) before substitution. If none match, the stage is skipped, so a docs-only change never reaches eslint or pytest. A command with a filter but no placeholder (like `tsc --noEmit` above) runs only when a matching file changed.
+- **`cwd`** (a directory inside the project, no `..`) makes a command a package's own: it runs in that directory and only sees changed files below it. `{files}`, `{dirs}` and the `files` globs are then relative to it (`**/*.ts` means the package's TypeScript), and the stage is skipped when nothing under it changed, even for a command like `dotnet test` that takes no placeholder.
 - A command with neither runs as written. That suits `typecheck`, which needs the whole project.
 - A path starting with `-` is passed as `./-name`, so it can't be read as an option.
 
@@ -131,7 +148,7 @@ Plugin skills and agents are named `harness:<name>`.
 
 Use them through `/harness:review` (and the test-writer offers in `review`, `ship` and `plan`), or directly: `@agent-harness:reviewer review my branch against main`.
 
-The skills call the plugin's CLI, which you can run yourself: `node <plugin>/bin/harness.mjs init` (a dry run that prints JSON), `init --write [--force-config]` and `verify [--all | --base <ref>]`. `verify` exits 0 on `verify: passed` and also on `verify: nothing ran` (no check executed, which is not a pass), 1 when a check fails and 2 on a usage, config or git error.
+The skills call the plugin's CLI, which you can run yourself: `node <plugin>/bin/harness.mjs init` (a dry run that prints JSON), `init --write [--force-config] [--packages <paths>]` (`--packages apps/web,apps/backend` keeps only those packages of a monorepo) and `verify [--all | --base <ref>]`. `verify` exits 0 on `verify: passed` and also on `verify: nothing ran` (no check executed, which is not a pass), 1 when a check fails and 2 on a usage, config or git error.
 
 ## Known limitations
 

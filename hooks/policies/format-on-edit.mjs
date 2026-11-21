@@ -2,7 +2,7 @@
 // Silent on success; a failure comes back as context so the agent can react.
 import { statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { runStage, tail } from "../../lib/verify.mjs";
+import { describeRun, runStage, tail } from "../../lib/verify.mjs";
 
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
 const OUTPUT_TAIL = 1500;
