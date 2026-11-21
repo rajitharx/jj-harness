@@ -89,13 +89,55 @@ test("output tail is capped at about 8 KB and keeps the end", async () => {
   assert.ok(verdict.reason.length < 9 * 1024, `reason length ${verdict.reason.length}`);
 });
 
-test("a pass saves the fingerprint; the next stop allows without re-running", async () => {
+test("a pass tells the user which checks ran, which were skipped, and on how many files", async () => {
+  const ts = (run) => ({ run, files: ["**/*.ts"] });
+  const PASS_FILES = "true {files}";
+  const cases = [
+    {
+      name: "every stage ran",
+      verify: { lint: PASS_FILES, typecheck: PASS, test: PASS_FILES },
+      change: (root) => (touch(root), touch(root, "README.md")),
+      text: "harness: lint ✓ typecheck ✓ test ✓ (2 changed files)",
+    },
+    {
+      name: "a filtered stage is listed as skipped",
+      verify: { lint: ts(PASS_FILES), test: PASS },
+      change: (root) => touch(root, "README.md"),
+      text: "harness: lint skipped test ✓ (1 changed file)",
+    },
+    {
+      name: "only configured stages are listed",
+      verify: { test: PASS },
+      change: (root) => touch(root),
+      text: "harness: test ✓ (1 changed file)",
+    },
+    {
+      name: "nothing ran is never a pass",
+      verify: { lint: ts(PASS_FILES), test: ts(PASS) },
+      change: (root) => touch(root, "README.md"),
+      text: "harness: no checks ran (lint skipped test skipped; 1 changed file)",
+    },
+    {
+      name: "only deletions: {files} stages skip, whole-project stages run",
+      verify: { lint: PASS_FILES, typecheck: PASS },
+      change: (root) => rmSync(join(root, "src/a.ts")),
+      text: "harness: lint skipped typecheck ✓ (no changed files to pass: only deletions or .harness/)",
+    },
+  ];
+  for (const { name, verify, change, text } of cases) {
+    const root = repo(verify);
+    change(root);
+    assert.deepEqual((await stop(root)).verdict, { kind: "notice", text }, name);
+  }
+});
+
+test("a pass saves the fingerprint; the next stop allows silently without re-running", async () => {
   const c = counter(0);
   const root = repo({ test: c.cmd });
   touch(root);
-  assert.deepEqual((await stop(root)).verdict, { kind: "allow" });
+  assert.deepEqual((await stop(root)).verdict, { kind: "notice", text: "harness: test ✓ (1 changed file)" });
   assert.equal(c.runs(), 1);
-  assert.deepEqual((await stop(root)).verdict, { kind: "allow" });
+  assert.deepEqual((await stop(root)).verdict, { kind: "allow" }, "no repeated notice on an unchanged tree");
   assert.deepEqual((await stop(root, { session: "other" })).verdict, { kind: "allow" });
   assert.equal(c.runs(), 1, "not re-run while the tree is unchanged");
 
@@ -146,9 +188,15 @@ test("gives up after maxAttempts consecutive blocks, then resets for the next tu
   for (let i = 0; i < 4; i++) {
     const { verdict, logs } = await stop(root, { stop_hook_active: i > 0 });
     seq.push(verdict.kind);
-    if (i === 2) assert.match(logs.join("\n"), /gave up after 2 attempts/);
+    if (i === 2) {
+      assert.match(logs.join("\n"), /gave up after 2 attempts/);
+      assert.equal(
+        verdict.text,
+        "harness: gave up after 2 blocked stops (stopGate.maxAttempts); allowed this stop with checks still failing.",
+      );
+    }
   }
-  assert.deepEqual(seq, ["block", "block", "allow", "block"]);
+  assert.deepEqual(seq, ["block", "block", "notice", "block"]);
 });
 
 test("stop_hook_active alone does not bypass the gate", async () => {
@@ -161,7 +209,7 @@ test("attempts are counted per session", async () => {
   const root = repo({ test: FAIL }, { maxAttempts: 1 });
   touch(root);
   assert.equal((await stop(root, { session: "A" })).verdict.kind, "block");
-  assert.equal((await stop(root, { session: "A" })).verdict.kind, "allow", "A gave up");
+  assert.equal((await stop(root, { session: "A" })).verdict.kind, "notice", "A gave up");
   assert.equal((await stop(root, { session: "B" })).verdict.kind, "block", "B has its own budget");
 });
 
@@ -170,7 +218,7 @@ test("a pass resets the session's attempt count", async () => {
   touch(root);
   assert.equal((await stop(root)).verdict.kind, "block");
   touch(root, "fixed", "");
-  assert.equal((await stop(root)).verdict.kind, "allow");
+  assert.equal((await stop(root)).verdict.kind, "notice", "passed");
   rmSync(join(root, "fixed"));
   assert.equal((await stop(root)).verdict.kind, "block");
   assert.equal((await stop(root)).verdict.kind, "block", "count restarted from 0 after the pass");
@@ -189,7 +237,7 @@ test("{files} receives only changed, non-deleted files, root-relative", async ()
   rmSync(join(root, "e.ts"));
   touch(root, "dir/f g's.ts", "untracked\n");
   touch(root, ".harness/progress.md", "- harness files are not source\n");
-  assert.deepEqual((await stop(root)).verdict, { kind: "allow" });
+  assert.deepEqual((await stop(root)).verdict, { kind: "notice", text: "harness: test ✓ (4 changed files)" });
   assert.deepEqual(JSON.parse(readFileSync(out, "utf8")), ["a.ts", "b.ts", "d.ts", "dir/f g's.ts"]);
 });
 
@@ -197,7 +245,7 @@ test("a {files} stage is skipped when only deletions changed; whole-project stag
   const typecheck = counter(0);
   const root = repo({ lint: `${FAIL} {files}`, typecheck: typecheck.cmd });
   rmSync(join(root, "src/a.ts"));
-  assert.deepEqual((await stop(root)).verdict, { kind: "allow" });
+  assert.equal((await stop(root)).verdict.kind, "notice");
   assert.equal(typecheck.runs(), 1);
 });
 
@@ -209,7 +257,10 @@ test("file filters: a docs-only change skips filtered stages and never reaches s
     typecheck: { run: typecheck.cmd, files: ["**/*.ts"] },
   });
   touch(root, "README.md", "docs only\n");
-  assert.deepEqual((await stop(root)).verdict, { kind: "allow" });
+  assert.deepEqual((await stop(root)).verdict, {
+    kind: "notice",
+    text: "harness: no checks ran (lint skipped typecheck skipped; 1 changed file)",
+  });
   assert.equal(lint.runs() + typecheck.runs(), 0);
   touch(root, "src/a.ts");
   assert.equal((await stop(root)).verdict.kind, "block", "a matching change runs the filtered stage");
@@ -255,13 +306,21 @@ test("stays bounded when the state can't be saved: allows instead of blocking fo
     try {
       const kinds = [];
       const logs = [];
+      const texts = [];
       for (let i = 0; i < 5; i++) {
         const r = await stop(root, { stop_hook_active: i > 0 });
         kinds.push(r.verdict.kind);
+        texts.push(r.verdict.text);
         logs.push(...r.logs);
       }
-      assert.deepEqual(kinds, Array(5).fill("allow"), name);
+      assert.deepEqual(kinds, Array(5).fill("notice"), name);
       assert.match(logs.join("\n"), /could not save state|counter/, name);
+      assert.match(
+        texts[0],
+        /^harness: the test check failed, but the attempt counter in \.harness\/state could not be saved, so the gate allowed this stop/,
+        name,
+      );
+      for (const t of texts) assert.match(t, /allowed this stop/, name);
     } finally {
       chmodSync(join(root, ".harness"), 0o755);
     }
@@ -274,7 +333,10 @@ test("backstop: an unreadable counter on a continuation allows without running",
   touch(root);
   mkdirSync(join(root, ".harness/state/verify-gate.json"), { recursive: true });
   const { verdict, logs } = await stop(root, { stop_hook_active: true });
-  assert.deepEqual(verdict, { kind: "allow" });
+  assert.deepEqual(verdict, {
+    kind: "notice",
+    text: "harness: checks not run: the attempt counter in .harness/state/verify-gate.json is unreadable, so the gate allowed this stop.",
+  });
   assert.equal(c.runs(), 0);
   assert.match(logs.join("\n"), /unreadable/);
 });
@@ -289,18 +351,42 @@ test("writes .harness/state/.gitignore even when the directory already exists", 
   assert.ok(!git(root, "status", "--porcelain", "--untracked-files=all").includes(".harness/state"));
 });
 
-test("an overall deadline caps the stages and allows once it passes", async () => {
+test("an overall deadline caps the stages and allows with a notice once it passes", async () => {
   const later = counter(1);
   const root = repo({ lint: `node -e "setTimeout(() => {}, 30000)"`, test: later.cmd });
   touch(root);
   const started = Date.now();
   const { verdict, logs } = await stop(root, { deadlineMs: 500 });
-  assert.deepEqual(verdict, { kind: "allow" });
+  assert.deepEqual(verdict, {
+    kind: "notice",
+    text: "harness: ran out of time at the lint check; allowed this stop with the remaining checks unfinished.",
+  });
   assert.ok(Date.now() - started < 5000, "lint was cut at the deadline, not at timeoutSec");
   assert.match(logs.join("\n"), /ran out of time/);
   assert.equal(later.runs(), 0);
 
   const none = await stop(root, { deadlineMs: 0 });
-  assert.deepEqual(none.verdict, { kind: "allow" });
+  assert.equal(none.verdict.kind, "notice");
+  assert.match(none.verdict.text, /ran out of time at the lint check/);
   assert.equal(later.runs(), 0, "no stage starts after the deadline");
+});
+
+test("a deadline notice names the checks that passed before it", async () => {
+  const root = repo({ lint: PASS, test: `node -e "setTimeout(() => {}, 30000)"` });
+  touch(root);
+  const { verdict } = await stop(root, { deadlineMs: 1500 });
+  assert.deepEqual(verdict, {
+    kind: "notice",
+    text: "harness: ran out of time at the test check after lint ✓; allowed this stop with the remaining checks unfinished.",
+  });
+});
+
+test("silent where nothing was looked at: no changes, disabled, nothing configured, not a git repo", async () => {
+  const cases = [
+    ["clean tree", repo({ test: PASS })],
+    ["disabled", (() => { const r = repo({ test: PASS }, { enabled: false }); touch(r); return r; })()],
+    ["nothing configured", (() => { const r = repo({}); touch(r); return r; })()],
+    ["not a git repo", makeProject({ verify: { test: PASS } })],
+  ];
+  for (const [name, root] of cases) assert.deepEqual((await stop(root)).verdict, { kind: "allow" }, name);
 });

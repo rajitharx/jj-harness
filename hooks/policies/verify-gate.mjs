@@ -1,6 +1,10 @@
 // On Stop, if the working tree differs from HEAD, run lint, typecheck and test
 // (only related files where a command uses `{files}`) and block with the
 // failure so the agent fixes it. A per-session attempt counter bounds the loop.
+// Whenever it lets the stop through after looking at changes, it tells the
+// user what happened with a notice: which checks passed or were skipped, or
+// why it allowed the stop with checks unfinished. The agent's last message is
+// written before Stop fires, so only the user can be told.
 //
 // This module is the only reader and writer of <root>/.harness/state/verify-gate.json:
 //   { fingerprint: string | null, attempts: { [sessionId]: number } }
@@ -41,13 +45,15 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
   if (changed.length === 0) return { kind: "allow" };
 
   const state = readState(config.root);
+  // Silent: the run that saved this fingerprint already sent its notice, and
+  // repeating it on every turn with no new changes would be noise.
   if (state.fingerprint && state.fingerprint === fingerprint(config, changed)) return { kind: "allow" };
 
   // Backstop for the loop guard: if the counter can't be read back, it can't
   // bound a continuation chain, so don't block one.
   if (!state.readable && input.stop_hook_active === true) {
     log("verify-gate: attempt counter is unreadable and this is a continuation; allowing stop");
-    return { kind: "allow" };
+    return notice(`checks not run: the attempt counter in ${STATE_DIR}/${STATE_FILE} is unreadable, so the gate allowed this stop.`);
   }
 
   const session = typeof input.session_id === "string" && input.session_id ? input.session_id : "unknown";
@@ -57,23 +63,33 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
     log(`verify-gate: gave up after ${attempts} attempts; allowing stop with checks still failing`);
     delete state.attempts[session];
     writeState(config.root, state, log);
-    return { kind: "allow" };
+    return notice(
+      `gave up after ${attempts} blocked stops (stopGate.maxAttempts); allowed this stop with checks still failing.`,
+    );
   }
 
   const files = stageFiles(changed);
+  /** @type {[string, "passed" | "skipped"][]} */
+  const done = [];
   for (const stage of stages) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) return deadlinePassed(stage, log);
+    if (remaining <= 0) return deadlinePassed(stage, done, log);
     const result = await runStage(stage, config, files, {
       timeoutMs: Math.min(config.stopGate.timeoutSec * 1000, remaining),
     });
-    if (result.ok) continue;
-    if (result.timedOut && Date.now() >= deadline) return deadlinePassed(stage, log);
+    if (result.ok) {
+      done.push([stage, result.skipped ? "skipped" : "passed"]);
+      continue;
+    }
+    if (result.timedOut && Date.now() >= deadline) return deadlinePassed(stage, done, log);
     state.attempts[session] = attempts + 1;
     // Fail open: a block whose count can't be saved would never reach maxAttempts.
     if (!writeState(config.root, state, log)) {
       log(`verify-gate: the ${stage} stage failed, but the attempt counter could not be saved; allowing stop`);
-      return { kind: "allow" };
+      return notice(
+        `the ${stage} check failed, but the attempt counter in ${STATE_DIR} could not be saved, ` +
+          "so the gate allowed this stop rather than risk an endless loop.",
+      );
     }
     return { kind: "block", reason: blockReason(stage, result, config, attempts + 1) };
   }
@@ -86,7 +102,26 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
   }
   delete state.attempts[session];
   writeState(config.root, state, log);
-  return { kind: "allow" };
+  return passNotice(done, files.length);
+}
+
+/** @returns {import("../../lib/harness.mjs").Verdict} */
+function notice(text) {
+  return { kind: "notice", text: `harness: ${text}` };
+}
+
+/** One mark per stage: `lint ✓`, `typecheck skipped`. */
+function stageSummary(done) {
+  return done.map(([stage, outcome]) => `${stage} ${outcome === "passed" ? "✓" : "skipped"}`).join(" ");
+}
+
+/** `harness: lint ✓ test ✓ (2 changed files)`, but never a pass when every stage was skipped. */
+function passNotice(done, fileCount) {
+  const scope = fileCount
+    ? `${fileCount} changed file${fileCount === 1 ? "" : "s"}`
+    : "no changed files to pass: only deletions or .harness/";
+  if (!done.some(([, outcome]) => outcome === "passed")) return notice(`no checks ran (${stageSummary(done)}; ${scope})`);
+  return notice(`${stageSummary(done)} (${scope})`);
 }
 
 function listChanges(root) {
@@ -183,9 +218,10 @@ function writeState(root, state, log) {
 }
 
 /** Fail open once the overall deadline is gone, so Claude Code never has to kill the hook. */
-function deadlinePassed(stage, log) {
+function deadlinePassed(stage, done, log) {
   log(`verify-gate: ran out of time (overall gate deadline) during or before the ${stage} stage; allowing stop`);
-  return { kind: "allow" };
+  const before = done.length ? ` after ${stageSummary(done)}` : "";
+  return notice(`ran out of time at the ${stage} check${before}; allowed this stop with the remaining checks unfinished.`);
 }
 
 function firstLine(err) {

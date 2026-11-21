@@ -163,10 +163,11 @@ test("e2e: one session through SessionStart, guards, format-on-edit and the Stop
     ]);
   }
 
-  // 5. The agent fixes the file; the continuation Stop passes. A second Stop
-  //    with nothing new changed allows without running anything.
+  // 5. The agent fixes the file; the continuation Stop passes and tells the
+  //    user so (typecheck isn't configured, so it isn't listed). A second Stop
+  //    with nothing new changed allows silently without running anything.
   writeFile(root, "src/a.js", "export const a = 10;\n");
-  assert.deepEqual(stop(ctx, true).out, {});
+  assert.deepEqual(stop(ctx, true).out, { systemMessage: "harness: lint ✓ test ✓ (2 changed files)" });
   const ran = calls(log).length;
   assert.deepEqual(calls(log).slice(-2), [["lint", ["src/a.js"]], ["test", ["src/a.js"]]]);
   assert.deepEqual(stop(ctx).out, {});
@@ -185,7 +186,11 @@ test("e2e: the Stop gate gives up after maxAttempts, then a new turn gets a fres
   assert.match(second.out.reason, /Attempt 2 of 2/);
 
   const third = stop(ctx, true);
-  assert.deepEqual(third.out, {}, "gives up: allow");
+  assert.deepEqual(
+    third.out,
+    { systemMessage: "harness: gave up after 2 blocked stops (stopGate.maxAttempts); allowed this stop with checks still failing." },
+    "gives up: allow, and the user is told",
+  );
   assert.match(third.stderr, /gave up after 2 attempts/);
   assert.equal(calls(ctx.log).filter(([s]) => s === "test").length, 2, "giving up runs nothing");
 
@@ -201,7 +206,8 @@ test("e2e: stop_hook_active with an unreadable attempt counter allows instead of
   writeFile(ctx.root, ".harness/state/verify-gate.json", "{ not json");
 
   const continuation = stop(ctx, true);
-  assert.deepEqual(continuation.out, {});
+  assert.deepEqual(Object.keys(continuation.out), ["systemMessage"], "allows, telling only the user");
+  assert.match(continuation.out.systemMessage, /^harness: checks not run: the attempt counter .* is unreadable/);
   assert.match(continuation.stderr, /attempt counter is unreadable and this is a continuation/);
   assert.deepEqual(calls(ctx.log), [], "nothing ran");
 
