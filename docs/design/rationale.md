@@ -50,4 +50,4 @@ B is the base. From A I kept generating `CLAUDE.md` into the project, because pr
 
 ## Next implementation step
 
-Implement `lib/config.mjs` and `runHook`/`mergeVerdicts` with tests, then `guard-bash` and `guard-paths`.
+Core runtime done (see `docs/ROADMAP.md` step 1). Next: `guard-bash` and `guard-paths`.

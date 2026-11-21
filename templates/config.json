@@ -1,6 +1,6 @@
 {
   "verify": { "format": "", "lint": "", "typecheck": "", "test": "" },
-  "protectedPaths": [".env", ".env.*", "**/*.pem", "**/*.key", ".git/**"],
+  "protectedPaths": [],
   "blockedCommands": [],
   "stopGate": { "enabled": true, "maxAttempts": 3 }
 }

@@ -8,7 +8,7 @@ A reusable agent harness for Claude Code, shipped as a plugin. Install it once a
 - **Workflow skills**: `harness-init`, `plan`, `verify`, `review`, `ship`, `handoff`.
 - **Agents**: `reviewer` (read-only), `test-writer`.
 
-> Status: **sketch**. The interfaces are in place and the bodies are `not implemented`. See `docs/design/rationale.md`.
+> Status: **in progress**. Progress and a per-step completion log are in [`docs/ROADMAP.md`](docs/ROADMAP.md); the design is in [`docs/design/rationale.md`](docs/design/rationale.md).
 
 ## Install
 
@@ -28,7 +28,7 @@ That writes `.harness/config.json`, which is the only file the harness reads per
 ```json
 {
   "verify": { "format": "npx prettier -w", "lint": "npm run lint", "typecheck": "npx tsc --noEmit", "test": "npm test" },
-  "protectedPaths": [".env", "**/*.pem"],
+  "protectedPaths": ["secrets/**"],
   "blockedCommands": ["terraform destroy"],
   "stopGate": { "enabled": true, "maxAttempts": 3 }
 }
