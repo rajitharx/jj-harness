@@ -65,7 +65,7 @@ The model wrote `src/b.js` (`export default 1;`). PreToolUse:Write → `{}`, Pos
 
 The formatter got exactly the edited file, and the gate's lint and test got only `src/b.js` (not `src/a.js` or the stubs). `.harness/state/verify-gate.json` holds the fingerprint of the passing tree and no attempts.
 
-**Observation**: the model's final message said "I haven't run the lint or test checks on it". A passing gate is silent: Stop has no context channel, so neither the model nor the user sees that the checks ran and passed. Not a bug; recorded as a follow-up.
+**Observation**: the model's final message said "I haven't run the lint or test checks on it". A passing gate is silent: Stop has no context channel, so neither the model nor the user sees that the checks ran and passed. Not a bug; recorded as a follow-up. Fixed in 0.1.1: a pass now sends the user a `systemMessage` such as `harness: lint ✓ test ✓ (1 changed file)`.
 
 ### (c) `/harness:verify` and a live Stop block
 

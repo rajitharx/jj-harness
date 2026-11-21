@@ -13,6 +13,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 4 | Workflow skills | ✅ |
 | 5 | Agents | ✅ |
 | 6 | Dogfood and release | ✅ |
+| 0.1.1 | Post-0.1.0: doc fixes and gate notices | ✅ |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -71,8 +72,20 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - [x] Official validation: `claude plugin validate .` passes with no errors; the marketplace description, marketplace `version` and `network.hosts` warnings are fixed, and CI runs the validator (it needs no credentials)
 - [x] End-to-end hook test (`test/e2e.test.mjs`): one session through `hooks/run.mjs`, spawned exactly as `hooks/hooks.json` does, against a fixture git repo with stub verify commands
 - [x] Live dogfood with `claude -p --plugin-dir`: three headless sessions in a temp fixture (guard-paths deny, format-on-edit plus the Stop gate, `/harness:verify` plus a live Stop block). Report in `docs/dogfood-v0.1.0.md`
-- [x] Release readiness: `CHANGELOG.md`, versions agree across `plugin.json`, `marketplace.json` and `package.json` (`test/release.test.mjs`), CI on Node 22/24 × Ubuntu/macOS, README rewrite with a config reference checked against `lib/config.mjs`
+- [x] Release readiness: `CHANGELOG.md`, the `plugin.json` and `package.json` versions agree and the marketplace entry carries no version (`test/release.test.mjs`), CI on Node 22/24 × Ubuntu/macOS, README rewrite with a config reference checked against `lib/config.mjs`
 - [x] Release checklist (README, "Release checklist"): `claude plugin tag` creates `harness--v0.1.0`, then `gh release create --verify-tag`. Tagging and the release are done by the orchestrator after this PR merges, not in this branch
+
+## Post-0.1.0 ✅
+
+Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
+
+- [x] README release checklist: say what `claude plugin tag` checks (the marketplace version is compared only when the entry sets one, which ours doesn't; a dirty tree or an existing tag is refused)
+- [x] `docs/ROADMAP.md` step 6: `plugin.json` and `package.json` agree, and the marketplace entry carries no version
+- [x] README Quickstart: `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` described as the host-marketplace docs do (adding an `owner/repo` marketplace already falls back to HTTPS; `/plugin` installs and updates don't)
+- [x] `{ kind: "notice", text }` verdict: `mergeVerdicts` maps notices to the top-level `systemMessage` on every event, joined, capped at 1,000 characters, alongside any block or context; an empty notice fails open as an invalid verdict
+- [x] `verify-gate` notices: a pass lists each configured stage as ✓ or skipped with the changed-file count; all skipped says "no checks ran"; the fingerprint skip stays silent; give-up, deadline, unsaved-counter and unreadable-counter allows say so
+- [x] Tests: table-driven mapping, combination, capping and invalid-notice cases in `test/harness.test.mjs`; notice content, skipped stages, nothing-ran, silent paths and every allow-without-pass notice in `test/verify-gate.test.mjs`; `systemMessage` on the passing, give-up and unreadable-counter Stops in `test/e2e.test.mjs`
+- [x] Release 0.1.1: `plugin.json` and `package.json` bumped, `CHANGELOG.md` entry with compare links on the `harness--v<version>` tags
 
 ---
 
@@ -382,7 +395,6 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 **Known gaps**
 - Agents and five of the six skills are loaded but not exercised live (see above).
 - The final "allow" after a live fix wasn't observed in session (c) because of `--max-turns 4`; `test/e2e.test.mjs` covers it.
-- A passing Stop gate is silent. In session (b) the model said it hadn't run the checks, though the gate had. Stop has no context channel; a `systemMessage` could fix it.
 - The marketplace install path (`/plugin marketplace add rajitharx/jj-harness`) wasn't tested; it needs git credentials for the private repo.
 - `claude plugin validate .` can't run with `--strict` in CI while the dev `CLAUDE.md` sits at the plugin root. Moving the plugin into a subdirectory would fix it, but changes the marketplace `source` and every path.
 - The CI validator is pinned to 2.1.330 and needs a manual bump.
@@ -399,3 +411,37 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - **No `version` on the marketplace entry.** The same page says "Don't set `version` in both `plugin.json` and the marketplace entry" (plugin.json wins without warning). The entry's `version` is removed. `claude plugin validate .` still passes, `--strict` on `marketplace.json` still passes, and `claude plugin tag --dry-run` still gives `harness--v0.1.0` from plugin.json. `test/release.test.mjs` now checks that `package.json` equals `plugin.json` and that the marketplace entry has no `version`.
 - The release checklist uses `gh release create … --verify-tag`, so a missing tag fails instead of being created from `main`.
 - `npm test`: 342/342 passing (342 before this round; one release test changed, none added).
+
+### 0.1.1: Doc fixes and gate notices (2026-11-21)
+
+**Shipped**
+- **Doc fixes from the PR #6 review.**
+  - README release checklist: `claude plugin tag` (2.1.330 `--help`: "validating that plugin.json and any enclosing marketplace entry agree") compares versions only when the marketplace entry sets one, and ours doesn't. The checklist now says the tag takes its version from `plugin.json`, `test/release.test.mjs` keeps `package.json` in step, and the tool refuses a dirty tree or an existing tag unless `--force`. `--dry-run` on the 0.1.0 tree reported `Tag "harness--v0.1.0" already exists locally`, and on this branch before committing it refused the uncommitted changes. The `gh release create` line uses `harness--v<version>` instead of a fixed version.
+  - Step 6 checklist: `plugin.json` and `package.json` agree, and the marketplace entry carries no version.
+  - Quickstart: the `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` note now follows the host-marketplace docs (code.claude.com/docs/en/plugins/host-marketplace, "Grant access to a private marketplace" and "Serve users who have no git-host account"). For `owner/repo`, Claude Code probes `ssh -T git@github.com`. Adding the marketplace falls back to HTTPS when the probe or the SSH clone fails, and so does `claude plugin install` from a shell. `/plugin` installs in a session and plugin updates don't fall back, and the variable skips the probe.
+- **`notice` verdict.** `Verdict` gains `{ kind: "notice", text }`. `mergeVerdicts` adds the notices to whatever the event-specific mapping returns as the top-level `systemMessage`, on every event. Notices are trimmed, joined one per line in policy order and capped at 1,000 characters. A notice whose text is not a non-blank string is an invalid verdict and fails open. The Stop comment now says why context stays dropped: Stop's `additionalContext` would continue the turn.
+- **The gate tells the user what it did.** When it ran its stages and allows, `verify-gate` returns a notice:
+  - pass: `harness: lint ✓ typecheck skipped test ✓ (2 changed files)`. Only configured stages are listed, skipped ones as `skipped`, and the count is the changed files passed to the stages (or `no changed files to pass: only deletions or .harness/`);
+  - every stage skipped: `harness: no checks ran (lint skipped test skipped; 1 changed file)`, so it never reads as a pass;
+  - gave up after `maxAttempts`; ran out of the overall deadline (naming the stage, and the stages that passed before it); the attempt counter couldn't be saved after a failure; the counter was unreadable on a continuation. Each ends with "allowed this stop". The stderr log lines are unchanged.
+
+  It stays silent on the fingerprint skip (nothing changed since the last pass: the run that saved the fingerprint already sent its notice, and repeating it every turn would be noise), and where it looked at nothing: gate disabled, no gate commands, a clean tree, or not a git repo (a notice there would fire on every turn of a non-git project).
+
+**Verified**
+- `npm test`: 349/349 passing (342 before: +4 in `test/harness.test.mjs`, +3 in `test/verify-gate.test.mjs`, and the existing gate and e2e tests now assert the notices), in about 11 s.
+  - `harness.test.mjs`: a table of every event with a notice alone and with a block, context or both (Stop still drops context but keeps the notice); joining, trimming and keeping notices out of `additionalContext`; the 1,000-character cap on one and on joined notices; `""`, blank, missing and non-string text failing open while another policy's notice survives.
+  - `verify-gate.test.mjs`: a table of pass notices (all ran, filtered stage skipped, only configured stages, all skipped, deletions only); the silent fingerprint skip; the give-up, deadline (with and without earlier passes), unsaved-counter and unreadable-counter notices; silence when disabled, unconfigured, clean or not a repo.
+  - `e2e.test.mjs`: the passing continuation Stop outputs exactly `{ "systemMessage": "harness: lint ✓ test ✓ (2 changed files)" }` and the next Stop `{}`; the give-up and unreadable-counter Stops output only a `systemMessage`.
+- **Live check** (Claude Code 2.1.330, `claude -p --plugin-dir . --model haiku --output-format stream-json --verbose --include-hook-events`, a temp fixture with `true {files}` lint and test, $0.005): the session wrote `src/b.js`, the Stop hook returned `{"systemMessage":"harness: lint ✓ test ✓ (1 changed file)"}`, and Claude Code emitted `{"type":"system","subtype":"informational","content":"Stop says: harness: lint ✓ test ✓ (1 changed file)","level":"notice"}`. A non-blocking Stop's `systemMessage` does reach the user; the hooks reference doesn't say so for Stop specifically.
+- `claude plugin validate .`: `✔ Validation passed with warnings`, exit 0. The two known warnings only: `CLAUDE.md at the plugin root is not loaded as project context`, and the plugin-directory `ICON_MISSING` check. `claude plugin validate --strict .claude-plugin/marketplace.json`: `✔ Validation passed`.
+
+**Changes from the sketch**
+- The notice verdict is the suggested shape. The hooks reference (code.claude.com/docs/en/hooks) lists `systemMessage` among the common output fields ("Warning message shown to the user") that every event accepts, and lists none of our four events among those that discard it, so one top-level mapping works for all of them. `suppressOutput` is documented as "Has no effect", so it isn't used. Stop's `hookSpecificOutput.additionalContext` exists but continues the conversation, which is wrong for a pass.
+- The cap is 1,000 characters rather than the 16 KB used for agent text: a notice is a status line, and Claude Code shows hook strings over 10,000 characters only as a 2,000-character preview.
+- The pass notice counts "changed files" rather than the sketch's "related files": the count is the changed files given to the stages, and a filtered stage may see fewer.
+- **format-on-edit gets no notice.** A failure already reaches the agent as context next to the tool result, and a broken formatter would add a user notice to every edit. Not worth the noise.
+
+**Known gaps**
+- The gate's notices aren't shown to the model, so the agent's own summary can still say it didn't run the checks. The user now sees the line right after it.
+- The hooks reference caps `additionalContext` and `systemMessage` at 10,000 characters; `runHook` still caps context at 16 KB (follow-up in the rationale).
+- The live check covers headless `stream-json`. How the interactive TUI renders a Stop `systemMessage` wasn't observed.
