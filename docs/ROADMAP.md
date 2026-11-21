@@ -176,10 +176,19 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - `.harness/` files aren't passed to `{files}`, because they're never lint or test input. They still count as changes for the fingerprint.
 - Two small private helpers, `lib/verify.mjs` and `lib/git.mjs`, so format-on-edit, verify-gate and session-context share one way to run commands and one `git status` parser.
 
+**Review round 1 (PR #3)**
+- **Loop guard fails open when state can't be saved (blocking).** Before, a read-only `.harness/` or a directory at `.harness/state/verify-gate.json` kept the attempt count at 0, so the gate blocked forever. Now `writeState` reports failure, and a failing stage whose count can't be saved allows (logged). As a backstop, a continuation (`stop_hook_active: true`) with an unreadable state file allows without running. Tests cover both repros (the chmod case is skipped as root) and the backstop.
+- **Leading `-` in file names (blocking).** `-rf`, `--x=1` or `--config=evil.js` reached `eslint {files}` as options. `pathArg` in `lib/verify.mjs` prefixes such paths with `./` before quoting, for both `{files}` and the format append. Table rows cover it alone and combined with spaces, quotes and `$(…)`, and an argv-echo run checks them end to end.
+- **Overall deadline.** One Stop gets 840 s in total (below the 900 s hook timeout in `hooks.json`). Each stage runs with `min(stopGate.timeoutSec, remaining)`, and once the deadline passes the gate allows and logs. `runStage` also catches SIGTERM, SIGINT and SIGHUP while a stage runs, kills the stage's process group, and re-raises the signal. A test SIGTERMs a parent process running a stage with a background grandchild and checks that both are gone (and fails if the handler is removed).
+- **`.gitignore` whenever missing.** `.harness/state/.gitignore` is written whenever it's missing, not only when the directory is created.
+- **Defaults in `lib/config.mjs` only.** The duplicate `?? 300` in `lib/verify.mjs` is gone. The format limit is a new validated top-level key, `formatTimeoutSec` (integer ≥ 1, default 30), in the typedef, `templates/config.json` and the README. `runStage` defaults to `formatTimeoutSec` for `format` and `stopGate.timeoutSec` for the other stages.
+- `npm test`: 246/246 passing.
+
 **Known gaps**
 - "Changed files" includes edits the user made before the session, and anything else uncommitted, so the gate can block on someone else's work in progress.
 - A change committed mid-turn no longer counts as changed, so the gate doesn't check it.
 - The fingerprint uses mtime and size, so a change that keeps both (rare, e.g. a tool that restores mtimes) isn't noticed, and a `touch` without a content change triggers a re-run.
 - Related-test quality depends on the tool. `vitest related` and `jest --findRelatedTests` follow imports; other stacks need approximations (step 4). `{files}` lists every changed file, including docs and config, so commands must tolerate non-source paths.
-- Each stage has its own timeout. Three stages near the 300 s default can together reach the 900 s hook timeout, and then Claude Code kills the hook (which fails open).
+- The overall 840 s deadline keeps the gate inside the 900 s hook timeout, and SIGTERM/SIGINT/SIGHUP to the hook kill the running stage's process group. A SIGKILL to the hook can't be caught, though, so a stage would then outlive it.
+- If the state file can't be written, the gate never blocks: it fails open rather than risk an unbounded loop. The checks still run and the failure is logged to stderr.
 - Quoting is POSIX-shell quoting. On Windows (`cmd.exe`), file names with spaces or quotes may not survive.

@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../lib/config.mjs";
-import { buildCommand, runStage, shellQuote } from "../lib/verify.mjs";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { buildCommand, pathArg, runStage, shellQuote } from "../lib/verify.mjs";
 import { makeProject, writeFile } from "./helpers.mjs";
 
 // Prints its arguments as JSON, so tests see exactly what the shell passed.
@@ -45,14 +48,33 @@ test("shellQuote leaves plain paths alone and quotes the rest", () => {
   for (const [input, expected] of cases) assert.equal(shellQuote(input), expected, input);
 });
 
+test("pathArg keeps a leading '-' from reading as an option, combined with quoting", () => {
+  const cases = [
+    ["-rf", "./-rf"],
+    ["--x=1", "./--x=1"],
+    ["--config=evil.js", "./--config=evil.js"],
+    ["-", "./-"],
+    ["-my file.ts", "'./-my file.ts'"],
+    ["-it's.ts", "'./-it'\\''s.ts'"],
+    ["--$(id).ts", "'./--$(id).ts'"],
+    ["src/-rf", "src/-rf"],
+    ["a-b.ts", "a-b.ts"],
+    ["my file.ts", "'my file.ts'"],
+  ];
+  for (const [input, expected] of cases) assert.equal(pathArg(input), expected, input);
+  assert.equal(buildCommand("lint", "eslint {files}", ["-rf", "--config=evil.js"]), "eslint ./-rf ./--config=evil.js");
+  assert.equal(buildCommand("format", "prettier -w", ["--write=x"]), "prettier -w ./--write=x");
+});
+
 test("runStage passes awkward file names to the command intact", async () => {
   const config = project({ test: "node argv.cjs {files}", format: "node argv.cjs" });
-  const files = ["plain.ts", "with space.ts", "it's.ts", 'dq"uote.ts', "$HOME.ts", "`id`.ts", "a;b.ts"];
+  const files = ["plain.ts", "with space.ts", "it's.ts", 'dq"uote.ts', "$HOME.ts", "`id`.ts", "a;b.ts", "-rf", "--x=1", "-a b's"];
+  const expected = files.map((f) => (f.startsWith("-") ? `./${f}` : f));
   for (const stage of ["test", "format"]) {
     const r = await runStage(stage, config, files);
     assert.equal(r.ok, true, r.output);
     assert.equal(r.skipped, false);
-    assert.deepEqual(JSON.parse(r.output), files, stage);
+    assert.deepEqual(JSON.parse(r.output), expected, stage);
   }
 });
 
@@ -99,3 +121,53 @@ test("runStage keeps only the tail of very long output", async () => {
   assert.ok(r.output.length <= 64 * 1024);
   assert.ok(r.output.endsWith("END"));
 });
+
+test("runStage defaults to formatTimeoutSec for format and stopGate.timeoutSec otherwise", async () => {
+  const root = makeProject({
+    verify: { format: `node -e "setTimeout(() => {}, 20000)"`, test: `node -e "setTimeout(() => {}, 20000)"` },
+    formatTimeoutSec: 1,
+    stopGate: { timeoutSec: 1 },
+  });
+  const config = loadConfig(root);
+  const [format, testStage] = await Promise.all([runStage("format", config, ["a.ts"]), runStage("test", config, [])]);
+  assert.equal(format.timedOut, true);
+  assert.equal(testStage.timedOut, true);
+});
+
+test("killing the hook process with SIGTERM also kills the running stage's process group", async () => {
+  const root = makeProject();
+  // The stage records its shell's pid and a background grandchild's pid, then waits.
+  const cmd = "sleep 30 & echo $! > grandchild.pid; echo $$ > stage.pid; wait";
+  const config = { root, verify: { test: cmd }, stopGate: { timeoutSec: 60 }, formatTimeoutSec: 30 };
+  const verifyUrl = new URL("../lib/verify.mjs", import.meta.url).href;
+  const script = `const { runStage } = await import(${JSON.stringify(verifyUrl)}); await runStage("test", ${JSON.stringify(config)}, []);`;
+  const parent = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: "ignore" });
+  const exited = new Promise((resolve) => parent.on("exit", (code, signal) => resolve(signal)));
+
+  const pidFiles = ["stage.pid", "grandchild.pid"].map((f) => join(root, f));
+  await waitFor(() => pidFiles.every((f) => existsSync(f) && readFileSync(f, "utf8").trim()));
+  const pids = pidFiles.map((f) => Number(readFileSync(f, "utf8").trim()));
+  assert.ok(pids.every(alive), "stage running before the kill");
+
+  parent.kill("SIGTERM");
+  assert.equal(await exited, "SIGTERM", "the parent still dies of the signal");
+  await waitFor(() => !pids.some(alive));
+  assert.deepEqual(pids.filter(alive), [], "no stage process is left behind");
+});
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitFor(check, ms = 5000) {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error("timed out waiting");
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}

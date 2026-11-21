@@ -35,7 +35,8 @@ That writes `.harness/config.json`, which is the only file the harness reads per
   },
   "protectedPaths": ["secrets/**"],
   "blockedCommands": ["terraform destroy"],
-  "stopGate": { "enabled": true, "maxAttempts": 3, "timeoutSec": 300 }
+  "stopGate": { "enabled": true, "maxAttempts": 3, "timeoutSec": 300 },
+  "formatTimeoutSec": 30
 }
 ```
 
@@ -43,8 +44,8 @@ The Stop gate checks only what changed, not the whole suite:
 
 - **`{files}`** in any `verify` command is replaced with the shell-quoted, root-relative paths of the files that differ from `HEAD` (modified, added, renamed and untracked; deleted files and `.harness/` are left out). If no files changed, that stage is skipped. Use it for related-test and per-file lint commands, e.g. `jest --findRelatedTests {files}` or `vitest related --run {files}`.
 - A command **without** `{files}` runs as written. That suits `typecheck`, which needs the whole project.
-- **`format`** runs after every edit on the edited file. Without `{files}`, the file path is appended.
-- Before the agent stops, lint, typecheck and test run in that order, each with a `stopGate.timeoutSec` limit. The first failure blocks the stop with its output. A passing tree is fingerprinted, so stopping again without changes doesn't re-run anything. After `stopGate.maxAttempts` blocks in a row, the gate gives up for that turn.
+- **`format`** runs after every edit on the edited file, limited by `formatTimeoutSec`. Without `{files}`, the file path is appended. A path starting with `-` is passed as `./-name`, so it can't be read as an option.
+- Before the agent stops, lint, typecheck and test run in that order, each with a `stopGate.timeoutSec` limit and all within an overall 840 s budget (below the 900 s hook timeout). The first failure blocks the stop with its output. A passing tree is fingerprinted, so stopping again without changes doesn't re-run anything. After `stopGate.maxAttempts` blocks in a row, the gate gives up for that turn.
 - Harness state lives in `.harness/state/`, which ignores itself in git.
 
 ## Develop

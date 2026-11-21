@@ -5,7 +5,6 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { runStage, tail } from "../../lib/verify.mjs";
 
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
-const FORMAT_TIMEOUT_MS = 30_000;
 const OUTPUT_TAIL = 1500;
 
 /** @param {object} input @param {import("../../lib/config.mjs").HarnessConfig} config
@@ -21,10 +20,11 @@ export async function formatOnEdit(input, config) {
   if (!inside || !isFile(abs)) return { kind: "allow" };
   const file = sep === "/" ? rel : rel.split(sep).join("/");
 
-  const result = await runStage("format", config, [file], { timeoutMs: FORMAT_TIMEOUT_MS });
+  // The time limit is config.formatTimeoutSec (runStage's default for format).
+  const result = await runStage("format", config, [file]);
   if (result.ok) return { kind: "allow" };
   const why = result.timedOut
-    ? `timed out after ${FORMAT_TIMEOUT_MS / 1000}s`
+    ? `timed out after ${config.formatTimeoutSec}s (formatTimeoutSec)`
     : result.exitCode === null
       ? "could not run"
       : `exited with code ${result.exitCode}`;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../lib/config.mjs";
@@ -21,10 +21,11 @@ function counter(code = 0) {
 }
 
 /** Run the gate with a captured log. */
-async function stop(root, { session = "s1", stop_hook_active = false } = {}) {
+async function stop(root, { session = "s1", stop_hook_active = false, deadlineMs } = {}) {
   const logs = [];
   const verdict = await verifyGate({ session_id: session, stop_hook_active, cwd: root }, loadConfig(root), {
     log: (m) => logs.push(m),
+    ...(deadlineMs === undefined ? {} : { deadlineMs }),
   });
   return { verdict, logs };
 }
@@ -222,4 +223,69 @@ test("a corrupt state file is treated as empty", async () => {
   writeFile(root, ".harness/state/.gitignore", "*\n");
   assert.equal((await stop(root)).verdict.kind, "block");
   assert.ok(existsSync(join(root, ".harness/state/verify-gate.json")));
+});
+
+const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
+test("stays bounded when the state can't be saved: allows instead of blocking forever", async () => {
+  const cases = [
+    ["read-only .harness", (root) => chmodSync(join(root, ".harness"), 0o555), isRoot],
+    ["a directory at the state file", (root) => mkdirSync(join(root, ".harness/state/verify-gate.json"), { recursive: true }), false],
+  ];
+  for (const [name, breakState, skip] of cases) {
+    if (skip) continue; // root ignores file permissions
+    const root = repo({ test: FAIL });
+    touch(root);
+    breakState(root);
+    try {
+      const kinds = [];
+      const logs = [];
+      for (let i = 0; i < 5; i++) {
+        const r = await stop(root, { stop_hook_active: i > 0 });
+        kinds.push(r.verdict.kind);
+        logs.push(...r.logs);
+      }
+      assert.deepEqual(kinds, Array(5).fill("allow"), name);
+      assert.match(logs.join("\n"), /could not save state|counter/, name);
+    } finally {
+      chmodSync(join(root, ".harness"), 0o755);
+    }
+  }
+});
+
+test("backstop: an unreadable counter on a continuation allows without running", async () => {
+  const c = counter(1);
+  const root = repo({ test: c.cmd });
+  touch(root);
+  mkdirSync(join(root, ".harness/state/verify-gate.json"), { recursive: true });
+  const { verdict, logs } = await stop(root, { stop_hook_active: true });
+  assert.deepEqual(verdict, { kind: "allow" });
+  assert.equal(c.runs(), 0);
+  assert.match(logs.join("\n"), /unreadable/);
+});
+
+test("writes .harness/state/.gitignore even when the directory already exists", async () => {
+  const root = repo({ test: PASS });
+  mkdirSync(join(root, ".harness/state"));
+  writeFile(root, ".harness/state/notes.txt", "x");
+  touch(root);
+  await stop(root);
+  assert.equal(readFileSync(join(root, ".harness/state/.gitignore"), "utf8"), "*\n");
+  assert.ok(!git(root, "status", "--porcelain", "--untracked-files=all").includes(".harness/state"));
+});
+
+test("an overall deadline caps the stages and allows once it passes", async () => {
+  const later = counter(1);
+  const root = repo({ lint: `node -e "setTimeout(() => {}, 30000)"`, test: later.cmd });
+  touch(root);
+  const started = Date.now();
+  const { verdict, logs } = await stop(root, { deadlineMs: 500 });
+  assert.deepEqual(verdict, { kind: "allow" });
+  assert.ok(Date.now() - started < 5000, "lint was cut at the deadline, not at timeoutSec");
+  assert.match(logs.join("\n"), /ran out of time/);
+  assert.equal(later.runs(), 0);
+
+  const none = await stop(root, { deadlineMs: 0 });
+  assert.deepEqual(none.verdict, { kind: "allow" });
+  assert.equal(later.runs(), 0, "no stage starts after the deadline");
 });
