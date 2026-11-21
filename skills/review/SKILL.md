@@ -13,10 +13,19 @@ description: Review the current change (branch diff or staged diff) for correctn
    - If the user asks for the staged change, or you're on the base branch: `git diff --staged`.
    - If the diff is empty, say so and stop. Also note the list of changed files (`git diff --stat`).
 
-2. **Send it to the reviewer.** Use the Agent tool with `subagent_type: "harness:reviewer"`. In the prompt, give it the base branch, the list of changed files, the diff (or the command to produce it, if it is very large), and the intent of the change in one or two sentences. Ask for correctness, security and test-gap findings, each with a file, a line, and a concrete failure scenario.
+2. **Send it to the reviewer.** Use the Agent tool with `subagent_type: "harness:reviewer"`. In the prompt, give it:
+   - the base ref and the exact diff commands you used (and the diff itself, unless it is very large);
+   - the list of changed files and the intent of the change in one or two sentences;
+   - the project's rules files: `CLAUDE.md` and `AGENTS.md` at the root (and any in the changed directories), which it must read and check the change against;
+   - the plugin path (two levels above this skill's base directory, which you were told when the skill loaded), so it can run `node "<plugin>/bin/harness.mjs" verify`;
+   - any focus areas the user named.
 
-3. **Verify every finding yourself** before reporting it. Open the code at the cited lines and check that the problem is real in this diff: trace the inputs, read the callers, and run a test or a small command where you can. Drop findings that don't hold up, and findings about code the diff didn't touch (mention those separately only if serious).
+   The agent is read-only and returns findings tagged `blocking`, `should-fix` or `nit`, each with file:line, evidence, a fix and CONFIRMED or PLAUSIBLE, plus a "Checked and fine" list and a verdict.
 
-4. **Report, ranked by severity**: blocking (bugs, security holes, data loss), then important (missing tests for new behaviour, error-handling gaps), then minor. For each finding give the file and line, what goes wrong and when, and a suggested fix. Say how many findings the reviewer raised and how many you dropped. If nothing survives, say the review found no verified issues.
+3. **Re-verify every finding yourself** before reporting it. Open the code at the cited lines and check that the problem is real in this diff: trace the inputs, read the callers, and re-run the agent's repro or a small command where you can. Drop findings that don't hold up, and findings about code the diff didn't touch (mention those separately only if serious). Keep the agent's CONFIRMED/PLAUSIBLE tag only if your own check agrees; downgrade it otherwise.
+
+4. **Report, ranked by severity**: blocking, then should-fix, then nit. For each finding give the file and line, what goes wrong and when, the evidence, the suggested fix and the verdict tag. Then the checks the agent ran and their results, and the verdict (approve, or request changes if any blocking finding remains). Say how many findings the reviewer raised and how many you dropped. If nothing survives, say the review found no verified issues.
+
+   If a finding is a missing test for changed behaviour, offer to run the `harness:test-writer` agent on it.
 
 Don't edit files during the review unless the user asks for the fixes.

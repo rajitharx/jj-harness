@@ -15,7 +15,7 @@ description: Commit the current work and open a pull request safely - refuses on
    node "<skill base dir>/../../bin/harness.mjs" verify
    ```
 
-   If it exits non-zero, stop and report the failing stage and its output exactly. Don't commit with failing checks.
+   If it exits non-zero, stop and report the failing stage and its output exactly. Don't commit with failing checks. If the changed behaviour has no tests at all, tell the user and offer to run the `harness:test-writer` agent first.
 
 3. **Choose what to stage.** Show `git status --short`. Stage files by explicit path (`git add -- <path> ...`); never `git add -A`, `git add .` or `git commit -a`. Never stage a file that matches a protected path: the defaults are `.env`, `.env.*`, `**/.env`, `**/.env.*`, `**/*.pem`, `**/*.key`, `**/id_rsa*`, `**/id_ed25519*` and `.git/**`, plus every pattern in `protectedPaths` in `.harness/config.json`. If such a file is changed, leave it unstaged and tell the user. Ask before staging files that look unrelated to the change.
 

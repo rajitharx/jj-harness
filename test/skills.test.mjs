@@ -6,23 +6,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultConfig } from "../lib/config.mjs";
 import { SUBCOMMANDS } from "../bin/harness.mjs";
+import { frontmatter } from "./helpers.mjs";
 
 const SKILLS = fileURLToPath(new URL("../skills/", import.meta.url));
 const dirs = readdirSync(SKILLS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
 const read = (dir) => readFileSync(join(SKILLS, dir, "SKILL.md"), "utf8");
-
-/** Parse the `key: value` lines of a SKILL.md frontmatter block. */
-function frontmatter(text) {
-  const m = /^---\n([\s\S]*?)\n---\n/.exec(text);
-  assert.ok(m, "starts with a --- frontmatter block");
-  return Object.fromEntries(
-    m[1]
-      .split("\n")
-      .map((l) => /^([\w-]+):\s*(.*)$/.exec(l))
-      .filter(Boolean)
-      .map(([, k, v]) => [k, v.trim()]),
-  );
-}
 
 /** Subcommands a skill invokes as `bin/harness.mjs <sub>` (quoted or not). */
 const invoked = (text) => [...text.matchAll(/bin\/harness\.mjs"?\s+([a-z][\w-]*)/g)].map((m) => m[1]);
