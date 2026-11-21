@@ -110,7 +110,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - `guard-paths` (PreToolUse, Edit/Write/MultiEdit/NotebookEdit): resolves the path against `cwd` (expanding a leading `~`), makes it relative to `config.root`, and matches it against `config.protectedPaths` with a private glob-to-RegExp compiler (`**`, `*`, `?`, wildcards match dot-files, case-insensitive because macOS and Windows filesystems are). For paths outside the root, only `**/` patterns apply, matched against the absolute path, so `~/.ssh/id_ed25519` is caught. The reason names the matched pattern.
 - `hooks.json`: the PreToolUse matcher now includes `NotebookEdit`, so `guard-paths` sees notebook edits.
 
-**Verified:** `npm test` gives 191/191 passing after review round 1 (141/141 at first push). That covers 79 must-block and 47 must-allow commands, 14 must-block and 8 must-allow paths, current-branch force-pushes against fixture repos (plain `.git` and a worktree `gitdir:`, plus detached and unreadable HEAD), a linear-time check on 200 KB commands, glob-semantics and outside-the-root cases, `blockedCommands`, and an end-to-end `run.mjs PreToolUse` deny for `rm -rf /`.
+**Verified:** `npm test` gives 197/197 passing after review round 2 (141/141 at first push, 191/191 after round 1). That covers 83 must-block and 49 must-allow commands, 14 must-block and 8 must-allow paths, current-branch force-pushes against fixture repos (plain `.git` and a worktree `gitdir:`, plus detached and unreadable HEAD), a linear-time check on 200 KB commands, glob-semantics and outside-the-root cases, `blockedCommands`, and an end-to-end `run.mjs PreToolUse` deny for `rm -rf /`.
 
 **Changes from the sketch**
 - Dropped "`git reset --hard` on shared branches" from `guard-bash`. It only touches the local working tree and branch (the reflog can recover commits), it has no remote target to check, and it's a common, legitimate command for agents. A project can still add it to `blockedCommands`.
@@ -133,6 +133,9 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - The fork-bomb regex is anchored with a lookbehind, so it runs in linear time. A 200 KB single token took about 20 s before.
 - `timeout <n>`, `nice`, `nohup`, `stdbuf` and `xargs` wrappers are stripped. `echo /` or `printf` piped into `xargs rm -rf` is checked. `../..`, `.*`, `../*`, `$PWD` and `$(pwd)` are dangerous rm targets.
 - guard-paths matches case-insensitively (`.ENV`, `server.KEY`), and an in-root directory named `..foo/` counts as inside the root.
+
+**Review round 2 (PR #2)**
+- Fixed a round-1 regression. The parser read `<<<` (a here-string) as a heredoc and dropped the quoted SQL, so `mysql -u root <<< "DROP DATABASE prod"` got through. `<<<` is now one token and the word after it stays in the command. `mysql <<<`, `psql <<<` and `psql -c … <<<` are blocked; `grep foo <<< "DROP TABLE"` is still allowed. `npm test`: 197/197 passing.
 
 **Known gaps**
 - The guards are best-effort pattern matching, not a sandbox. Obfuscation gets past them: variables such as `$DIR` (only the literal `$PWD`/`$(pwd)` forms are caught), aliases, base64, and scripts written to a file and then run.

@@ -277,7 +277,12 @@ function parse(command) {
       else append(command[++i]);
     } else if (((c === "$" || c === "<" || c === ">") && next === "(") || c === "`") {
       i = substitution(i);
-    } else if (c === "<" && next === "<" && command[i + 2] !== "<") {
+    } else if (c === "<" && next === "<" && command[i + 2] === "<") {
+      // A here-string: keep `<<<` as one token so the word after it stays in the command.
+      flush();
+      seg.words.push("<<<");
+      i += 2;
+    } else if (c === "<" && next === "<") {
       const header = readHeredocHeader(command, i + 2);
       if (!header) {
         append("<<");
