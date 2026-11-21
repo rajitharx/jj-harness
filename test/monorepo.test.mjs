@@ -172,7 +172,7 @@ const CASES = [
         ["packages/a", "npx --no -- vitest related --run --passWithNoTests {files}"],
       ],
     },
-    [/Monorepo: found 2 packages/],
+    [/Monorepo: found 3 packages/],
   ],
   [
     "a root with only lint does not cover a package's tests",
@@ -268,6 +268,7 @@ for (const [name, files, stacks, packages, expected, notePatterns] of CASES) {
     );
     assert.deepEqual(shape(d.verify), expected);
     for (const re of notePatterns) assert.ok(d.notes.some((n) => re.test(n)), `a note matches ${re}: ${JSON.stringify(d.notes)}`);
+    if (name.startsWith("a bare workspace root")) assert.ok(!d.notes.some((n) => /may run twice/.test(n)), "a root with no commands overlaps nothing");
     // Every proposal is a valid config, and packages' entries all carry a cwd.
     assert.doesNotThrow(() => validateConfig({ verify: d.verify }));
     for (const e of Object.values(d.verify).flatMap(entries)) {
