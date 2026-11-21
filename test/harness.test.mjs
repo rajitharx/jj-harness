@@ -22,6 +22,13 @@ test("PreToolUse: any block denies, reasons joined", async () => {
   });
 });
 
+test("PreToolUse: context only is passed through as additionalContext", async () => {
+  const r = await run("PreToolUse", [allow, ctx("note: lockfile changed")]);
+  assert.deepEqual(r.output, {
+    hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: "note: lockfile changed" },
+  });
+});
+
 test("PostToolUse: block and context both surface", async () => {
   const r = await run("PostToolUse", [block("formatter failed"), ctx("formatted a.js")]);
   assert.deepEqual(r.output, {
@@ -41,6 +48,25 @@ test("SessionStart: contexts concatenated in policy order", async () => {
   assert.deepEqual(r.output, {
     hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "branch: main\n\n2 dirty files" },
   });
+});
+
+test("SessionStart: a block is shown as context, ahead of other context", async () => {
+  const r = await run("SessionStart", [ctx("branch: main"), block("config invalid")]);
+  assert.deepEqual(r.output, {
+    hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "config invalid\n\nbranch: main" },
+  });
+});
+
+test("long reasons and context are capped at 16 KB with a marker", async () => {
+  const big = "x".repeat(70 * 1024);
+  const pre = (await run("PreToolUse", [block(big)])).output.hookSpecificOutput.permissionDecisionReason;
+  assert.equal(pre.length, 16 * 1024);
+  assert.ok(pre.endsWith("…[truncated]"));
+  const post = (await run("PostToolUse", [ctx(big)])).output.hookSpecificOutput.additionalContext;
+  assert.ok(post.length <= 16 * 1024 && post.endsWith("…[truncated]"));
+  const session = (await run("SessionStart", [ctx(big)])).output.hookSpecificOutput.additionalContext;
+  assert.ok(session.length <= 16 * 1024 && session.endsWith("…[truncated]"));
+  assert.equal((await run("Stop", [block("short")])).output.reason, "short", "short text is untouched");
 });
 
 test("policies receive input and resolved config", async () => {
@@ -66,6 +92,15 @@ test("fail open: invalid verdict shape is logged and treated as allow", async ()
   const r = await run("PreToolUse", [() => ({ kind: "block" })], { logs });
   assert.deepEqual(r.output, {});
   assert.match(logs[0], /invalid verdict/);
+});
+
+test("fail open: block with an empty or whitespace reason is an invalid verdict", async () => {
+  for (const reason of ["", "   \n"]) {
+    const logs = [];
+    const r = await run("PreToolUse", [block(reason)], { logs });
+    assert.deepEqual(r.output, {});
+    assert.match(logs[0], /invalid verdict/);
+  }
 });
 
 test("invalid config falls back to defaults and still runs policies", async () => {

@@ -14,11 +14,13 @@ try {
 try {
   const result = await runHook(event, input);
   process.stdout.write(JSON.stringify(result.output));
-  process.exit(result.exitCode);
+  // Set exitCode rather than calling process.exit(): exiting immediately can
+  // cut off stdout writes larger than the pipe buffer (64 KB on macOS).
+  process.exitCode = result.exitCode;
 } catch (err) {
   // Last-resort fail open.
   process.stderr.write(`[harness] ${err?.stack ?? err}\n`);
-  process.exit(0);
+  process.exitCode = 0;
 }
 
 async function readStdin() {
