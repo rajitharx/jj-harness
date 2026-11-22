@@ -16,3 +16,9 @@
 - Next: Step 5 docs (README, CHANGELOG, ROADMAP log, rationale), then Step 6 PR + separate review
 - Open questions: launchd job still not loaded (needs user's yes)
 - Gotchas: stats times are UTC; coverage is a lower bound (no paths stored)
+## 2026-11-22 rajiatha/harness-stats: stats step 5 (docs)
+- Done: README Stats section, CHANGELOG, ROADMAP log, rationale section + next step
+- In progress: nothing half-done
+- Next: Step 6, push, PR, separate review, merge
+- Open questions: launchd job still not loaded (needs user's yes)
+- Gotchas: none

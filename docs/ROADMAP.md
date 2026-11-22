@@ -15,7 +15,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 6 | Dogfood and release | ✅ |
 | 0.1.1 | Post-0.1.0: doc fixes and gate notices | ✅ |
 | 0.2.0 | Monorepo and .NET support in `harness-init` | ✅ |
-| stats | `harness stats`: per-session metrics and verification coverage | 🟡 |
+| stats | `harness stats`: per-session metrics and verification coverage | ✅ |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -100,15 +100,15 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - [x] Tests: monorepo fixture (two npm apps and a .NET project), single-stack (no regression) and empty repo, plus `cwd` runtime, gate, session-context and CLI cases
 - [x] README quickstart and `init --write` output mention `/reload-plugins` for a plugin installed mid-session
 
-## stats: `harness stats`: per-session metrics 🟡
+## stats: `harness stats`: per-session metrics ✅
 
-- [ ] `lib/metrics.mjs`: the only module that knows `.harness/state/metrics.jsonl`, its v1 schema and rotation (1 MiB, keep the newest half); fail open; never records command text, output, file contents, env values or paths
-- [ ] `runHook` records one generic entry per policy run; `verify-gate` and `format-on-edit` record their detail (stages, files checked, outcome, durations)
-- [ ] `lib/stats.mjs`: pure aggregation (verification coverage, caught, gate outcome, guard denies)
-- [ ] `stats [--session <id> | --last | --since <date|7d|24h>] [--json]` command, exit codes as `verify`
-- [ ] `skills/stats/SKILL.md` (`/harness:stats`)
-- [ ] Tests: `metrics`, `stats`, CLI, e2e, `runHook` fail-open
-- [ ] README "Stats" section, CHANGELOG, rationale ("no single effectiveness %", next step: escape tracking)
+- [x] `lib/metrics.mjs`: the only module that knows `.harness/state/metrics.jsonl`, its v1 schema and rotation (1 MiB, keep the newest half); fail open; never records command text, output, file contents, env values or paths
+- [x] `runHook` records one generic entry per policy run; `verify-gate` and `format-on-edit` record their detail (stages, files checked, outcome, durations)
+- [x] `lib/stats.mjs`: pure aggregation (verification coverage, caught, gate outcome, guard denies)
+- [x] `stats [--session <id> | --last | --since <date|7d|24h>] [--json]` command, exit codes as `verify`
+- [x] `skills/stats/SKILL.md` (`/harness:stats`)
+- [x] Tests: `metrics`, `stats`, CLI, e2e, `runHook` fail-open
+- [x] README "Stats" section, CHANGELOG, rationale ("no single effectiveness %", next step: escape tracking)
 
 ## Completion log
 
@@ -508,3 +508,36 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 
 **Review round 2** (PR #8: blocking)
 - The left-out rule dropped packages under a bare workspace root (`{"private":true}` plus `packages/*`), leaving an empty proposal and a false note. A package is now covered only when the root proposes every stage the package would add. Tests: the bare-root and lint-only-root cases. The test count in this log said 367 for `main`; it is 350.
+
+### stats: `harness stats` (2026-11-22)
+
+**Shipped**
+- **Metrics log** (`lib/metrics.mjs`, `lib/state.mjs`): `recordMetric` / `readMetrics` own `.harness/state/metrics.jsonl` (v1 lines with `ts`, rotation at 1 MiB keeping the newest half through temp file + rename, malformed and unknown-`v` lines skipped). Every function fails open (one short stderr line, nothing on stdout). Entries are rebuilt from a per-policy whitelist and strings are short identifiers, so command text, output, file contents, env values and paths can't be stored. `lib/state.mjs` (`ensureStateDir`) is now the one place that creates `.harness/state/` and its self-ignoring `.gitignore`; `verify-gate` uses it too.
+- **Recording**: a Verdict may carry `metrics`; `runHook` records it (adding event, policy id and session) and is the only writer. `guard-bash` (allow, or deny with a stable rule id; `blockedCommands` is its own id), `guard-paths`, `format-on-edit` (`ok`/`failed`/`skipped`/`timeout`, ms), `session-context` and `verify-gate` (per-stage `configured`/`ran`/`result`/`filesChecked`/`ms`, fingerprint, changed-file count, outcome `pass`/`block`/`nothing-ran`/`gave-up`/`deadline`, attempt).
+- **`stats [--session <id> | --last | --since <7d|24h|date>] [--json]`** (`lib/stats.mjs` is the pure aggregation and text renderer): verification coverage from the last gate run, stages, gate stops/blocks/final outcome, caught (blocks followed by a pass, by failed stage), formatter results, guard denies; totals plus per-session lines for `--since`. Exit 0 for a report or `stats: no data`, 2 for usage errors or an unreadable state dir. `skills/stats/SKILL.md` (`/harness:stats`).
+- README "Stats" section (definitions, `--json` keys, privacy, known gaps), CHANGELOG, rationale ("Measuring the harness", next step: escape tracking).
+
+**Verified**
+- `npm test`: 463/463 passing (416 on `main`).
+  - `test/metrics.test.mjs` (new): round trip, filters, malformed/unknown-`v` lines, rotation keeps the newest half as valid JSONL, unwritable state dir and log (no throw, one stderr line, nothing on stdout), the whitelist (a deny of a command with a fake token stores only the rule id), every guard-bash rule id.
+  - `test/stats.test.mjs` (new): coverage table (`n/a`, `no checks ran`, lower bound, cap, rounding), caught counting, gate outcomes incl. gave-up and deadline, the human block (equal to the example in the task), multi-session `--since`, `--json` keys, `parseSince`.
+  - `test/cli.test.mjs`: `stats` with no data, fixture data, `--session`, `--since`, a damaged log, nine bad-flag cases and an unreadable state dir (exit 2).
+  - `test/e2e.test.mjs`: the replayed session now ends with `stats --json` (coverage 50%, one failure caught, one bash and one path deny) and checks the log holds no command text or paths; a second test runs the hooks with the log made unwritable and asserts identical output.
+  - `test/harness.test.mjs`, `verify-gate`, `format-on-edit`, `guard-paths`, `session-context`: metrics emitted per outcome, nothing on silent paths, no paths or output.
+- Existing policy tests compare verdicts without `metrics` (`bare()` in `test/helpers.mjs`).
+- `claude plugin validate .` passes.
+
+**Changes from the task**
+- Recording uses the optional `metrics` field on the verdict (the task's allowed alternative), so `verify-gate` and `format-on-edit` don't call `recordMetric` themselves; `runHook` is the only writer. A `metrics` that isn't a plain object is ignored rather than invalidating the verdict.
+- No `metrics.enabled` config key (the task said to avoid it).
+- `changedFiles` in a gate entry is the files the stages can see (not deleted, not under `.harness/`), so coverage's denominator isn't inflated by files no check can look at.
+- `unchanged` isn't recorded; neither are the two fail-open paths for an unreadable or unsaveable attempt counter (no outcome in the schema fits).
+- `stats` times are UTC; a configured stage that was skipped reads `skipped` and an unconfigured one `not configured`.
+- The `stats` row in the status table is labelled `stats`, not a version: the version wasn't bumped.
+- The auto-resume launchd job was written but not loaded: the session that wrote it couldn't ask for the "yes" the task required.
+
+**Known gaps**
+- Coverage is a lower bound (no paths are stored, so it is the largest set any one stage checked).
+- Escapes (problems found after the gate passed: CI, reviewers, reverts) aren't measured; that's the next step in the rationale.
+- Only the Stop gate counts toward coverage; a manual `verify` isn't recorded. A gave-up or deadline gate run, being the last entry, shows `0%` and `no checks ran`, which describes that run but not the earlier blocks.
+- Two concurrent hook processes can race on a rotation and lose a line; accepted for a local log.

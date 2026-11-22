@@ -3,8 +3,8 @@
 Status: IN_PROGRESS
 Branch: rajiatha/harness-stats
 PR: (not opened yet)
-Last checkpoint: 2026-11-22 — Steps 2–4 done: metrics, stats lib/CLI/skill, tests; npm test 463/463, plugin validate passes.
-Next action: Step 5 — docs: README Stats section (+ skills table, CLI paragraph, known gaps), CHANGELOG [Unreleased], ROADMAP ticks and completion log, rationale section + Next implementation step.
+Last checkpoint: 2026-11-22 — Step 5 docs done (README, CHANGELOG, ROADMAP log, rationale); npm test 463/463.
+Next action: Step 6 — run npm test + `claude plugin validate .`, push branch, open PR with gh, then a separate reviewer agent reviews, fix blockers, squash-merge, set Status DONE.
 
 ## Checklist
 - [x] Step 0 — clean main, branch, resume file, auto-resume files written (launchd NOT loaded: needs user "yes")
@@ -12,7 +12,7 @@ Next action: Step 5 — docs: README Stats section (+ skills table, CLI paragrap
 - [x] Step 2 — recording metrics code (`lib/metrics.mjs`, `lib/state.mjs`, runHook, all 5 policies); its tests are in Step 4
 - [x] Step 3 — `stats` command + `skills/stats/SKILL.md`
 - [x] Step 4 — tests (463 passing)
-- [ ] Step 5 — docs (README, CHANGELOG, ROADMAP, rationale)
+- [x] Step 5 — docs (README, CHANGELOG, ROADMAP, rationale)
 - [ ] Step 6 — verify, commit, PR, separate review, merge, DONE
 
 ## Plan

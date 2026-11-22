@@ -5,7 +5,8 @@ A reusable agent harness for Claude Code, shipped as a plugin. Install it once a
 - **Guardrails**: blocks destructive shell commands and edits to secrets, keys and `.git/`.
 - **Verification loop**: formats each edited file, and runs lint, typecheck and the tests related to the changed files before the agent can stop.
 - **Session memory**: injects the branch, dirty files, verify commands and the last progress note at session start.
-- **Workflow skills**: `harness-init`, `plan`, `verify`, `review`, `ship`, `handoff`.
+- **Workflow skills**: `harness-init`, `plan`, `verify`, `review`, `ship`, `handoff`, `stats`.
+- **Stats**: records what the harness did in each session and reports how much of a change its checks covered and what they caught (`harness stats`).
 - **Agents**: `reviewer` (read-only, verified findings only) and `test-writer` (tests in the project's style, related tests only).
 
 Version 0.1.1. See [`CHANGELOG.md`](CHANGELOG.md), the per-step log in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the design in [`docs/design/rationale.md`](docs/design/rationale.md). Needs Node ≥22 on `PATH`; there are no dependencies to install.
@@ -142,13 +143,75 @@ Plugin skills and agents are named `harness:<name>`.
 | `/harness:review` | Send the diff to `harness:reviewer`, re-check its findings and report them by severity. |
 | `/harness:ship` | Refuse on `main`/`master`, verify, commit without protected files, push and open a PR with `gh pr create`. |
 | `/harness:handoff` | Append a dated progress note to `.harness/progress.md` for the next session. |
+| `/harness:stats` | Report what the harness checked and caught in a session, and quote the numbers. |
 
 - **`harness:reviewer`** reviews a diff or a branch against a base ref for correctness, security, concurrency, error handling, test gaps and the project's rules. It checks each finding against the code (CONFIRMED if reproduced, PLAUSIBLE if reasoned) and ends with `Verdict: approve | request changes`. Its tools are `Read, Grep, Glob, Bash`, with no editing tools.
 - **`harness:test-writer`** writes tests in the project's style, changes only tests and fixtures, runs only the related tests, and reports real bugs instead of fixing production code.
 
 Use them through `/harness:review` (and the test-writer offers in `review`, `ship` and `plan`), or directly: `@agent-harness:reviewer review my branch against main`.
 
-The skills call the plugin's CLI, which you can run yourself: `node <plugin>/bin/harness.mjs init` (a dry run that prints JSON), `init --write [--force-config] [--packages <paths>]` (`--packages apps/web,apps/backend` keeps only those packages of a monorepo) and `verify [--all | --base <ref>]`. `verify` exits 0 on `verify: passed` and also on `verify: nothing ran` (no check executed, which is not a pass), 1 when a check fails and 2 on a usage, config or git error.
+The skills call the plugin's CLI, which you can run yourself: `node <plugin>/bin/harness.mjs init` (a dry run that prints JSON), `init --write [--force-config] [--packages <paths>]` (`--packages apps/web,apps/backend` keeps only those packages of a monorepo) `verify [--all | --base <ref>]` and `stats [--session <id> | --last | --since <when>] [--json]` (see [Stats](#stats)). `verify` exits 0 on `verify: passed` and also on `verify: nothing ran` (no check executed, which is not a pass), 1 when a check fails and 2 on a usage, config or git error. `stats` exits 0 after a report or `stats: no data`, and 2 on a usage error or an unreadable `.harness/state/`.
+
+## Stats
+
+Every hook run leaves a small record in `.harness/state/metrics.jsonl`, and `harness stats` answers one question: *how much of this change did the harness actually check, and what did it catch?*
+
+```sh
+node <plugin>/bin/harness.mjs stats [--session <id> | --last | --since <when>] [--json]
+```
+
+- `--last` (the default) is the most recent session that has a Stop-gate run. `--session <id>` is one session. `--since <when>` is every session since then (`7d`, `24h`, or a date such as `2026-11-20`), shown as totals plus one line per session.
+- `--json` prints one object with the same numbers. Without data it prints `stats: no data` and exits 0; a usage error or an unreadable `.harness/state/` exits 2. Times are UTC.
+- `/harness:stats` runs it and quotes the output.
+
+```
+harness stats — session 3f2a9c1e… (2026-11-22 07:40 → 08:05 UTC)
+verification coverage   80%  (8/10 changed files checked by ≥1 stage)
+stages                  lint ✓ 8/10 · typecheck skipped · test ✓ 6/10
+gate                    3 stops · 2 blocks · final: pass after 2 blocks
+caught                  2 failures fixed before stop (lint 1, test 1)
+format-on-edit          12/12 ok
+guards                  1 deny (bash: force-push-main) · 0 path denies
+```
+
+**There is no "harness effectiveness" score.** Dividing what the harness caught by anything would need the bugs it missed, and those aren't known here. The one percentage is verification coverage; the rest are counts and outcomes.
+
+### Definitions
+
+- **Verification coverage**: the changed files checked by at least one stage that *ran* (result `pass` or `fail`), divided by the changed files, from the session's **last** gate run. "Changed files" are the ones the checks can see: deleted files and `.harness/` files aren't counted. With none it prints `n/a`, not 100%; if files changed but no stage ran it prints `0%` and says `no checks ran`. The log has no file paths (see Privacy), so "checked by at least one stage" is the largest number of files any stage that ran was given. That makes coverage a **lower bound**: two stages that checked different files count only the bigger set. A whole-project command that ran (`tsc --noEmit`, no `{files}`) counts every changed file as checked.
+- **Caught**: Stop-gate runs that blocked, in a session where a later run passed, counted by the stage that failed. A block with no later pass in the log (the agent gave up, or the session ended) isn't counted.
+- **Gate final outcome**: the outcome of the session's last gate run: `pass`, `block`, `nothing-ran`, `gave-up` or `deadline`. `nothing-ran` means every stage was skipped, which is not a pass.
+- **Stops, blocks**: gate runs, and those that blocked. A stop with no new changes since the last pass isn't a gate run and isn't recorded.
+
+A high coverage number means "checked", not "bug-free". It says nothing about how good the checks are.
+
+### `--json` keys
+
+```
+{ "v": 1, "scope": "last" | "session" | "since",
+  "sessions": [ { "session", "start", "end",            // ISO times of the first and last entry
+                  "coverage": { "percent" (null = n/a), "checked", "changed", "noChecksRan" },
+                  "stages":   [ { "name", "state": "pass"|"fail"|"timeout"|"skipped"|"not-configured", "filesChecked" } ],
+                  "gate":     { "stops", "blocks", "final" (null = no gate run) },
+                  "caught":   { "total", "byStage": { "<stage>": n } },
+                  "formatOnEdit": { "total", "ok", "failed", "skipped", "timeout" },
+                  "guards":   { "bashDenies", "pathDenies", "bashRules": { "<rule id>": n } } } ],
+  "totals": { "sessions", "coverage": { "percent", "checked", "changed" }, "gate": { "stops", "blocks" },
+              "caught", "formatOnEdit", "guards" } }  // summed over sessions; coverage = total checked / total changed
+```
+
+`stages` and `coverage` come from the last gate run. Keys are only added, never renamed, within `"v": 1`.
+
+### Privacy
+
+The log is local: it stays in `.harness/state/` (which ignores itself in git), is never committed and is never sent anywhere. It holds only counts, rule ids (`force-push-main`), stage names, outcomes, durations, the session id and a hash of the changed-file state. It never holds command text, command output, file contents, environment values or file paths: `lib/metrics.mjs` rebuilds every entry from a list of known fields, so a policy can't add them by accident. The file is trimmed to its newest half once it passes 1 MiB. Recording can't change what a hook does: if the log can't be written, the hook behaves as if it weren't there.
+
+### Known gaps
+
+- Coverage is a lower bound (above).
+- **Escapes aren't measured**: problems found after the gate passed (CI failures, review findings, reverts) aren't linked back to a session. Without them there's no way to say how many problems the checks missed.
+- Only the Stop gate's runs count toward coverage. Work the agent verified by itself, or a `harness verify` run by hand, isn't recorded.
+- Sessions are told apart by the session id Claude Code sends; a hook that doesn't send one is recorded without it and shown as `(none)`.
 
 ## Known limitations
 
