@@ -2,9 +2,9 @@
 
 Status: IN_PROGRESS
 Branch: rajiatha/harness-stats
-PR: (not opened yet)
-Last checkpoint: 2026-11-22 — Step 5 docs done (README, CHANGELOG, ROADMAP log, rationale); npm test 463/463.
-Next action: Step 6 — run npm test + `claude plugin validate .`, push branch, open PR with gh, then a separate reviewer agent reviews, fix blockers, squash-merge, set Status DONE.
+PR: https://github.com/rajitharx/jj-harness/pull/9
+Last checkpoint: 2026-11-22 — PR #9 opened; awaiting separate reviewer (Hawkeye).
+Next action: Get the PR #9 diff reviewed by a separate agent; fix blocking findings, re-review; when clean checkout the branch, npm test, `gh pr merge 9 --squash --delete-branch`, git checkout main && git pull, set Status: DONE and bootout the launchd job.
 
 ## Checklist
 - [x] Step 0 — clean main, branch, resume file, auto-resume files written (launchd NOT loaded: needs user "yes")
