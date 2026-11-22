@@ -21,8 +21,11 @@ export async function formatOnEdit(input, config) {
   const file = sep === "/" ? rel : rel.split(sep).join("/");
 
   // The time limit is config.formatTimeoutSec (runStage's default for format).
+  const started = Date.now();
   const result = await runStage("format", config, [file]);
-  if (result.ok) return { kind: "allow" };
+  const ms = Date.now() - started;
+  if (result.ok) return { kind: "allow", metrics: { result: result.skipped ? "skipped" : "ok", ms } };
+  const metrics = { result: result.timedOut ? "timeout" : "failed", ms };
   const why = result.timedOut
     ? `timed out after ${config.formatTimeoutSec}s (formatTimeoutSec)`
     : result.exitCode === null
@@ -30,6 +33,7 @@ export async function formatOnEdit(input, config) {
       : `exited with code ${result.exitCode}`;
   return {
     kind: "context",
+    metrics,
     text: `Formatter failed on ${file}: \`${result.command}\` ${why}.\n${tail(result.output, OUTPUT_TAIL) || "(no output)"}`,
   };
 }

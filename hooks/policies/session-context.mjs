@@ -58,7 +58,7 @@ export async function sessionContext(input, config) {
 
   let text = lines.join("\n");
   if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT - 1) + "…";
-  return { kind: "context", text };
+  return { kind: "context", text, metrics: {} };
 }
 
 /** Run `fn`, returning undefined on any error: missing git or files just drop a line. */

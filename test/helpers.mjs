@@ -3,6 +3,9 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+/** A verdict without its `metrics`: most policy tests care about the verdict only. */
+export const bare = ({ metrics, ...verdict }) => verdict;
+
 /** Make a throwaway project dir, optionally with a .harness/config.json. */
 export function makeProject(config) {
   const root = mkdtempSync(join(tmpdir(), "harness-test-"));

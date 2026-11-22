@@ -3,13 +3,13 @@
 Status: IN_PROGRESS
 Branch: rajiatha/harness-stats
 PR: (not opened yet)
-Last checkpoint: 2026-11-22 — Steps 0–1 done: main restored, branch created, resume + launchd files written (NOT loaded: session was non-interactive, awaiting user's yes), ROADMAP row added.
-Next action: Step 2 — write `lib/metrics.mjs`, then hook `runHook`, `verify-gate` and `format-on-edit` into it.
+Last checkpoint: 2026-11-22 — Step 2 code done, 416 existing tests green (policy tests now use `bare()` to ignore `metrics`).
+Next action: Step 3 — write `lib/stats.mjs` (pure aggregation), the `stats` command in `bin/harness.mjs`, and `skills/stats/SKILL.md` (+ `test/skills.test.mjs` list).
 
 ## Checklist
 - [x] Step 0 — clean main, branch, resume file, auto-resume files written (launchd NOT loaded: needs user "yes")
 - [x] Step 1 — plan (ROADMAP row + checklist, plan below)
-- [ ] Step 2 — recording metrics (`lib/metrics.mjs`, runHook, verify-gate, format-on-edit)
+- [x] Step 2 — recording metrics code (`lib/metrics.mjs`, `lib/state.mjs`, runHook, all 5 policies); its tests are in Step 4
 - [ ] Step 3 — `stats` command + `skills/stats/SKILL.md`
 - [ ] Step 4 — tests
 - [ ] Step 5 — docs (README, CHANGELOG, ROADMAP, rationale)
@@ -23,6 +23,12 @@ Next action: Step 2 — write `lib/metrics.mjs`, then hook `runHook`, `verify-ga
 
 ## Decisions
 - ROADMAP row is labelled `stats` (not 0.3.0), because the spec says not to bump the version.
+- Recording uses the optional `metrics` field on the Verdict (the spec's allowed alternative), not direct `recordMetric` calls from policies: `runHook` is the only writer, policies stay pure. `runHook` ignores a `metrics` that isn't a plain object (a policy bug must not change a verdict) and derives the `policy` id from the function name in kebab case.
+- `lib/metrics.mjs` rebuilds every entry from a per-policy whitelist (privacy by construction, not by caller discipline).
+- New `lib/state.mjs` (`ensureStateDir`) is the one place that creates `.harness/state/` + its self-ignoring .gitignore; verify-gate now uses it too.
+- `changedFiles` in a verify-gate entry = files the stages can see (`stageFiles`: not deleted, not `.harness/`), so coverage's denominator isn't inflated by files no stage can check.
+- verify-gate records: pass, nothing-ran, block, gave-up, deadline. Not recorded: `unchanged` (silent path) and the two fail-open paths (unreadable/unsaveable attempt counter).
+- guard-bash rules got stable ids; `blockedCommands` hits use the id `blockedCommands`.
 - The launchd job is written but not loaded: this session is non-interactive so the user's "yes" could not be asked for.
 
 ## Original prompt

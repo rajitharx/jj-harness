@@ -10,14 +10,19 @@
 //   { fingerprint: string | null, attempts: { [sessionId]: number } }
 // If that file can't be read or written, the gate allows rather than risk an
 // unbounded block loop.
+//
+// Every verdict that follows a look at the changes also carries `metrics` (what
+// each stage did, how many files it checked, the outcome) for lib/metrics.mjs.
+// Not recorded: the silent "no new changes since the last pass" path, and the
+// two fail-open paths for an unreadable or unsaveable attempt counter.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { changedFiles } from "../../lib/git.mjs";
+import { STATE_DIR, ensureStateDir } from "../../lib/state.mjs";
 import { CHECK_STAGES, describeRun, runStage, stageFiles, tail } from "../../lib/verify.mjs";
 
 const GATE_STAGES = CHECK_STAGES;
-const STATE_DIR = join(".harness", "state");
 const STATE_FILE = "verify-gate.json";
 const OUTPUT_TAIL = 8 * 1024;
 // Forget attempt counts of old sessions so the state file stays small.
@@ -45,9 +50,10 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
   if (changed.length === 0) return { kind: "allow" };
 
   const state = readState(config.root);
+  const startFingerprint = fingerprint(config, changed);
   // Silent: the run that saved this fingerprint already sent its notice, and
   // repeating it on every turn with no new changes would be noise.
-  if (state.fingerprint && state.fingerprint === fingerprint(config, changed)) return { kind: "allow" };
+  if (state.fingerprint && state.fingerprint === startFingerprint) return { kind: "allow" };
 
   // Backstop for the loop guard: if the counter can't be read back, it can't
   // bound a continuation chain, so don't block one.
@@ -58,30 +64,37 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
 
   const session = typeof input.session_id === "string" && input.session_id ? input.session_id : "unknown";
   const attempts = state.attempts[session] ?? 0;
+  // What the checks can look at: not deleted files, not harness files. This is
+  // the denominator of verification coverage.
+  const files = stageFiles(changed);
+  const stageLog = new StageLog(config, files.length);
+  const metrics = (outcome, fp = startFingerprint) => stageLog.metrics(outcome, fp, attempts + 1);
   if (attempts >= config.stopGate.maxAttempts) {
     // Give up for this turn and reset, so the next turn gets a fresh budget.
     log(`verify-gate: gave up after ${attempts} attempts; allowing stop with checks still failing`);
     delete state.attempts[session];
     writeState(config.root, state, log);
-    return notice(
-      `gave up after ${attempts} blocked stops (stopGate.maxAttempts); allowed this stop with checks still failing.`,
-    );
+    return {
+      ...notice(`gave up after ${attempts} blocked stops (stopGate.maxAttempts); allowed this stop with checks still failing.`),
+      metrics: metrics("gave-up"),
+    };
   }
 
-  const files = stageFiles(changed);
   /** @type {[string, "passed" | "skipped", number | undefined][]} */
   const done = [];
   for (const stage of stages) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) return deadlinePassed(stage, done, log);
+    if (remaining <= 0) return deadlinePassed(stage, done, log, metrics("deadline"));
+    const started = Date.now();
     const result = await runStage(stage, config, files, {
       timeoutMs: Math.min(config.stopGate.timeoutSec * 1000, remaining),
     });
+    stageLog.add(stage, result, Date.now() - started);
     if (result.ok) {
       done.push([stage, result.skipped ? "skipped" : "passed", result.fileCount]);
       continue;
     }
-    if (result.timedOut && Date.now() >= deadline) return deadlinePassed(stage, done, log);
+    if (result.timedOut && Date.now() >= deadline) return deadlinePassed(stage, done, log, metrics("deadline"));
     state.attempts[session] = attempts + 1;
     // Fail open: a block whose count can't be saved would never reach maxAttempts.
     if (!writeState(config.root, state, log)) {
@@ -91,7 +104,7 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
           "so the gate allowed this stop rather than risk an endless loop.",
       );
     }
-    return { kind: "block", reason: blockReason(stage, result, config, attempts + 1) };
+    return { kind: "block", reason: blockReason(stage, result, config, attempts + 1), metrics: metrics("block") };
   }
 
   // Fingerprint after the run, so files the checks themselves touch don't force a re-run.
@@ -102,7 +115,41 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
   }
   delete state.attempts[session];
   writeState(config.root, state, log);
-  return passNotice(done);
+  const ran = done.some(([, outcome]) => outcome === "passed");
+  return { ...passNotice(done), metrics: metrics(ran ? "pass" : "nothing-ran", state.fingerprint ?? startFingerprint) };
+}
+
+/**
+ * Collects what each stage did, for the `metrics` of the verdict. Stages that
+ * weren't reached (not configured, or after a failure) are listed as skipped.
+ * `filesChecked` is the files the stage's command was given, or all of them for
+ * a whole-project command that ran.
+ */
+class StageLog {
+  #ran = new Map();
+  constructor(config, changedFiles) {
+    this.config = config;
+    this.changedFiles = changedFiles;
+  }
+
+  add(stage, result, ms) {
+    const ran = !result.skipped;
+    this.#ran.set(stage, {
+      ran,
+      result: result.skipped ? "skipped" : result.ok ? "pass" : result.timedOut ? "timeout" : "fail",
+      filesChecked: ran ? (result.fileCount ?? this.changedFiles) : 0,
+      ms,
+    });
+  }
+
+  metrics(outcome, fingerprint, attempt) {
+    const stages = GATE_STAGES.map((name) => ({
+      name,
+      configured: Boolean(this.config.verify[name]),
+      ...(this.#ran.get(name) ?? { ran: false, result: "skipped", filesChecked: 0, ms: 0 }),
+    }));
+    return { fingerprint, changedFiles: this.changedFiles, stages, outcome, attempt };
+  }
 }
 
 /** @returns {import("../../lib/harness.mjs").Verdict} */
@@ -203,10 +250,7 @@ function writeState(root, state, log) {
   const file = join(dir, STATE_FILE);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    mkdirSync(dir, { recursive: true });
-    // Keep harness state out of the consumer's commits, even if the directory already existed.
-    const ignore = join(dir, ".gitignore");
-    if (!existsSync(ignore)) writeFileSync(ignore, "*\n");
+    ensureStateDir(root);
     const keys = Object.keys(state.attempts);
     for (const k of keys.slice(0, Math.max(0, keys.length - MAX_SESSIONS))) delete state.attempts[k];
     const { fingerprint, attempts } = state;
@@ -225,10 +269,10 @@ function writeState(root, state, log) {
 }
 
 /** Fail open once the overall deadline is gone, so Claude Code never has to kill the hook. */
-function deadlinePassed(stage, done, log) {
+function deadlinePassed(stage, done, log, metrics) {
   log(`verify-gate: ran out of time (overall gate deadline) during or before the ${stage} stage; allowing stop`);
   const before = done.length ? ` after ${stageSummary(done)}` : "";
-  return notice(`ran out of time at the ${stage} check${before}; allowed this stop with the remaining checks unfinished.`);
+  return { ...notice(`ran out of time at the ${stage} check${before}; allowed this stop with the remaining checks unfinished.`), metrics };
 }
 
 function firstLine(err) {

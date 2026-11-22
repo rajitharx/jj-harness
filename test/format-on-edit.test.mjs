@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../lib/config.mjs";
 import { formatOnEdit } from "../hooks/policies/format-on-edit.mjs";
-import { makeProject, writeFile } from "./helpers.mjs";
+import { bare, makeProject, writeFile } from "./helpers.mjs";
 
 // Records each formatter invocation's arguments: one line per run, arguments
 // separated by \x1f. A shell script keeps the test fast.
@@ -26,8 +26,9 @@ function setup(format) {
   return { root, config: loadConfig(root), calls: rec.calls };
 }
 
-const edit = (config, file_path, { tool = "Edit", cwd = config.root } = {}) =>
+const editRaw = (config, file_path, { tool = "Edit", cwd = config.root } = {}) =>
   formatOnEdit({ tool_name: tool, cwd, tool_input: { file_path } }, config);
+const edit = async (...args) => bare(await editRaw(...args));
 
 test("formats the edited file, root-relative, silently on success", async () => {
   const { root, config, calls } = setup("sh fmt.sh");
@@ -58,7 +59,7 @@ test("does nothing for other tools, missing paths, files outside the root or gon
     ["the root itself", { tool_name: "Edit", tool_input: { file_path: "." } }],
   ];
   for (const [name, input] of cases) {
-    assert.deepEqual(await formatOnEdit({ cwd: config.root, ...input }, config), { kind: "allow" }, name);
+    assert.deepEqual(bare(await formatOnEdit({ cwd: config.root, ...input }, config)), { kind: "allow" }, name);
   }
   assert.deepEqual(calls(), []);
   const none = setup(undefined);

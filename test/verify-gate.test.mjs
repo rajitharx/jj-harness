@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../lib/config.mjs";
 import { verifyGate } from "../hooks/policies/verify-gate.mjs";
-import { git, makeProject, makeRepo, writeFile } from "./helpers.mjs";
+import { bare, git, makeProject, makeRepo, writeFile } from "./helpers.mjs";
 
 const PASS = "exit 0";
 const FAIL = "echo first line; echo 'boom: expected 1 to equal 2' >&2; exit 1";
@@ -27,7 +27,7 @@ async function stop(root, { session = "s1", stop_hook_active = false, deadlineMs
     log: (m) => logs.push(m),
     ...(deadlineMs === undefined ? {} : { deadlineMs }),
   });
-  return { verdict, logs };
+  return { verdict: bare(verdict), metrics: verdict.metrics, logs };
 }
 
 const repo = (verify, stopGate) => makeRepo({ verify, ...(stopGate ? { stopGate } : {}) }, {

@@ -35,10 +35,12 @@ const DOWNLOAD_SUBST = /(?:\$\(|`|<\()\s*(?:\S*\/)?(?:curl|wget)\b/;
  * - "pipeline": an array of segments joined by `|` (a pipeline between `&&`, `||`, `;`, `&`, newlines)
  * - "segment":  one simple command { cmd, args, words, heredocs, subs, viaXargs }, wrappers stripped
  * Every test also gets `ctx`, whose `branch()` lazily reads the current git branch.
- * @type {{ scope: "command"|"pipeline"|"segment", test: (x: any, ctx: Ctx) => boolean, reason: string }[]}
+ * `id` is the rule's name in the metrics log (`harness stats`): keep it stable and free of the command.
+ * @type {{ id: string, scope: "command"|"pipeline"|"segment", test: (x: any, ctx: Ctx) => boolean, reason: string }[]}
  */
 const RULES = [
   {
+    id: "rm-rf-dangerous",
     scope: "pipeline",
     test: (pipeline) =>
       pipeline.some((s, k) => {
@@ -53,6 +55,7 @@ const RULES = [
       "recursive force-delete of /, home, the working directory or a bare glob is irreversible. Delete the specific paths you mean instead (e.g. `rm -rf ./dist ./node_modules`).",
   },
   {
+    id: "force-push-main",
     scope: "segment",
     test: ({ cmd, args }, ctx) => {
       const push = cmd === "git" && parsePush(args);
@@ -62,6 +65,7 @@ const RULES = [
       "force-pushing to main/master rewrites shared history. Push to a feature branch and open a PR, or use `git revert` to undo commits on main.",
   },
   {
+    id: "delete-main",
     scope: "segment",
     test: ({ cmd, args }, ctx) => {
       const push = cmd === "git" && parsePush(args);
@@ -70,6 +74,7 @@ const RULES = [
     reason: "deleting main/master on the remote breaks everyone using it. Delete feature branches only, and ask the user to change protected branches.",
   },
   {
+    id: "pipe-download-to-shell",
     scope: "pipeline",
     test: (pipeline) => {
       const i = pipeline.findIndex((s) => DOWNLOADERS.has(s.cmd));
@@ -79,6 +84,7 @@ const RULES = [
       "piping a download straight into a shell runs unreviewed remote code. Download to a file, inspect it, then run it (e.g. `curl -fsSLo install.sh <url> && less install.sh`).",
   },
   {
+    id: "run-download-in-shell",
     scope: "segment",
     test: ({ cmd, args }) => {
       if (cmd === "eval" || cmd === "source" || cmd === ".") return args.some((a) => DOWNLOAD_SUBST.test(a));
@@ -90,6 +96,7 @@ const RULES = [
       "running a download through a shell runs unreviewed remote code. Download to a file, inspect it, then run it.",
   },
   {
+    id: "destructive-sql",
     scope: "pipeline",
     test: (pipeline) =>
       pipeline.some((s) => s.words.some((w) => DB_CLIENTS.has(basename(w)))) &&
@@ -100,17 +107,20 @@ const RULES = [
       "destructive SQL (DROP DATABASE/SCHEMA/TABLE, TRUNCATE) sent to a database client. Write a reviewed migration, or ask the user to run it themselves.",
   },
   {
+    id: "mkfs",
     scope: "segment",
     test: ({ cmd }) => /^mkfs(?:\.|$)/.test(cmd ?? ""),
     reason: "mkfs formats a filesystem and destroys its data. Ask the user to run disk operations themselves.",
   },
   {
+    id: "dd-device",
     scope: "segment",
     test: ({ cmd, args }) =>
       cmd === "dd" && args.some((a) => /^of=\/dev\//.test(a) && !/^of=\/dev\/(?:null|stdout|stderr|fd\/)/.test(a)),
     reason: "dd writing to a device overwrites it irreversibly. Write to a regular file instead, or ask the user to run it.",
   },
   {
+    id: "chmod-recursive-root",
     scope: "segment",
     test: ({ cmd, args }) =>
       cmd === "chmod" &&
@@ -119,6 +129,7 @@ const RULES = [
     reason: "recursive chmod on / breaks the whole system's permissions. Change permissions on specific project paths instead.",
   },
   {
+    id: "fork-bomb",
     scope: "command",
     // The lookbehind anchors the name at a token start, which keeps this linear on long inputs.
     test: (cmd) => /(?<![\w:])([\w:]+)\s*\(\s*\)\s*\{\s*\1\s*\|\s*\1\s*&\s*\}\s*;?\s*\1/.test(cmd),
@@ -138,17 +149,22 @@ export async function guardBash(input, config) {
   let branch;
   const ctx = { branch: () => (branch === undefined ? (branch = readCurrentBranch(config.root)) : branch) };
   const hit = check(command, 0, ctx);
-  if (hit) return { kind: "block", reason: `Blocked \`${clip(hit.text)}\`: ${hit.reason}` };
+  if (hit) return deny(hit.id, `Blocked \`${clip(hit.text)}\`: ${hit.reason}`);
 
   for (const pattern of config.blockedCommands) {
     if (new RegExp(pattern).test(command)) {
-      return {
-        kind: "block",
-        reason: `Blocked \`${clip(command)}\`: it matches the project's blockedCommands pattern /${pattern}/ in .harness/config.json. Use a different command, or ask the user to run it.`,
-      };
+      return deny(
+        "blockedCommands",
+        `Blocked \`${clip(command)}\`: it matches the project's blockedCommands pattern /${pattern}/ in .harness/config.json. Use a different command, or ask the user to run it.`,
+      );
     }
   }
-  return { kind: "allow" };
+  return { kind: "allow", metrics: { verdict: "allow" } };
+}
+
+/** A block verdict; its metrics carry the rule id, never the command. */
+function deny(rule, reason) {
+  return { kind: "block", reason, metrics: { verdict: "deny", rule } };
 }
 
 /**
@@ -171,18 +187,18 @@ function readCurrentBranch(root) {
   }
 }
 
-/** @returns {{ reason: string, text: string } | null} */
+/** @returns {{ id: string, reason: string, text: string } | null} */
 function check(command, depth, ctx) {
   for (const rule of RULES) {
-    if (rule.scope === "command" && rule.test(command, ctx)) return { reason: rule.reason, text: command };
+    if (rule.scope === "command" && rule.test(command, ctx)) return { id: rule.id, reason: rule.reason, text: command };
   }
   for (const pipeline of parse(command)) {
     for (const rule of RULES) {
-      if (rule.scope === "pipeline" && rule.test(pipeline, ctx)) return { reason: rule.reason, text: show(pipeline) };
+      if (rule.scope === "pipeline" && rule.test(pipeline, ctx)) return { id: rule.id, reason: rule.reason, text: show(pipeline) };
     }
     for (const segment of pipeline) {
       for (const rule of RULES) {
-        if (rule.scope === "segment" && rule.test(segment, ctx)) return { reason: rule.reason, text: show([segment]) };
+        if (rule.scope === "segment" && rule.test(segment, ctx)) return { id: rule.id, reason: rule.reason, text: show([segment]) };
       }
       if (depth >= 3) continue;
       for (const nested of nestedCommands(segment)) {
