@@ -1,10 +1,10 @@
 # Plan: harness stats
 
-Status: IN_PROGRESS
+Status: DONE
 Branch: rajiatha/harness-stats
 PR: https://github.com/rajitharx/jj-harness/pull/9
-Last checkpoint: 2026-11-22 — review round 1 fixed (468 tests); awaiting re-review.
-Next action: Re-review PR #9 with a separate agent; if clean: checkout branch, npm test, `gh pr merge 9 --squash --delete-branch`, git checkout main && git pull, Status: DONE, launchctl bootout (job was never loaded; confirm gone).
+Last checkpoint: 2026-11-22 — Hawkeye re-review: approve (nits only); 468/468 tests; merging PR #9.
+Next action: none. PR #9 squash-merged; launchd job was never loaded (still needs the user's yes only if wanted).
 
 ## Checklist
 - [x] Step 0 — clean main, branch, resume file, auto-resume files written (launchd NOT loaded: needs user "yes")
@@ -13,7 +13,7 @@ Next action: Re-review PR #9 with a separate agent; if clean: checkout branch, n
 - [x] Step 3 — `stats` command + `skills/stats/SKILL.md`
 - [x] Step 4 — tests (468 passing)
 - [x] Step 5 — docs (README, CHANGELOG, ROADMAP, rationale)
-- [ ] Step 6 — verify, commit, PR, separate review, merge, DONE
+- [x] Step 6 — verify, commit, PR, separate review, merge, DONE
 
 ## Plan
 - `lib/metrics.mjs`: sole owner of `.harness/state/metrics.jsonl`; `recordMetric`, `readMetrics`, rotation at 1 MiB; fail open; no paths/commands.
