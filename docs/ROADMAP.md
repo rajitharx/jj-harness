@@ -15,6 +15,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 6 | Dogfood and release | ✅ |
 | 0.1.1 | Post-0.1.0: doc fixes and gate notices | ✅ |
 | 0.2.0 | Monorepo and .NET support in `harness-init` | ✅ |
+| stats | `harness stats`: per-session metrics and verification coverage | 🟡 |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -98,6 +99,16 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - [x] `harness-init` skill: reports the detected packages, asks which the Stop gate should check (`init --packages`), checks each command once
 - [x] Tests: monorepo fixture (two npm apps and a .NET project), single-stack (no regression) and empty repo, plus `cwd` runtime, gate, session-context and CLI cases
 - [x] README quickstart and `init --write` output mention `/reload-plugins` for a plugin installed mid-session
+
+## stats: `harness stats`: per-session metrics 🟡
+
+- [ ] `lib/metrics.mjs`: the only module that knows `.harness/state/metrics.jsonl`, its v1 schema and rotation (1 MiB, keep the newest half); fail open; never records command text, output, file contents, env values or paths
+- [ ] `runHook` records one generic entry per policy run; `verify-gate` and `format-on-edit` record their detail (stages, files checked, outcome, durations)
+- [ ] `lib/stats.mjs`: pure aggregation (verification coverage, caught, gate outcome, guard denies)
+- [ ] `stats [--session <id> | --last | --since <date|7d|24h>] [--json]` command, exit codes as `verify`
+- [ ] `skills/stats/SKILL.md` (`/harness:stats`)
+- [ ] Tests: `metrics`, `stats`, CLI, e2e, `runHook` fail-open
+- [ ] README "Stats" section, CHANGELOG, rationale ("no single effectiveness %", next step: escape tracking)
 
 ## Completion log
 
