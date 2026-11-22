@@ -122,8 +122,9 @@ export async function verifyGate(input, config, { log = logStderr, deadlineMs = 
 /**
  * Collects what each stage did, for the `metrics` of the verdict. Stages that
  * weren't reached (not configured, or after a failure) are listed as skipped.
- * `filesChecked` is the files the stage's command was given, or all of them for
- * a whole-project command that ran.
+ * `filesChecked` is the distinct changed files the stage covered: those in its
+ * scope that match its `files` filter, whether or not they were passed as paths
+ * (`eslint .` with a TypeScript-only filter covers the .ts files only).
  */
 class StageLog {
   #ran = new Map();
@@ -137,7 +138,7 @@ class StageLog {
     this.#ran.set(stage, {
       ran,
       result: result.skipped ? "skipped" : result.ok ? "pass" : result.timedOut ? "timeout" : "fail",
-      filesChecked: ran ? (result.fileCount ?? this.changedFiles) : 0,
+      filesChecked: ran ? Math.min(result.checkedCount ?? this.changedFiles, this.changedFiles) : 0,
       ms,
     });
   }

@@ -383,6 +383,7 @@ test("runStage runs each entry in its own directory with cwd-relative paths, in 
   const r = await runStage("test", config, ["apps/mobile/src/b.ts", "apps/web/src/a.ts"]);
   assert.equal(r.ok, true);
   assert.equal(r.fileCount, 2);
+  assert.equal(r.checkedCount, 2, "root-relative paths, one per file");
   assert.equal(r.commands.length, 2);
   assert.match(r.commands[0], /^\(in apps\/web\) node -e .* src\/a\.ts$/);
   assert.match(r.commands[1], /^\(in apps\/mobile\) node -e .* src\/b\.ts$/);

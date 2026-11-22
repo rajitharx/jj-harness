@@ -178,7 +178,7 @@ guards                  1 deny (bash: force-push-main) · 0 path denies
 
 ### Definitions
 
-- **Verification coverage**: the changed files checked by at least one stage that *ran* (result `pass` or `fail`), divided by the changed files, from the session's **last** gate run. "Changed files" are the ones the checks can see: deleted files and `.harness/` files aren't counted. With none it prints `n/a`, not 100%; if files changed but no stage ran it prints `0%` and says `no checks ran`. The log has no file paths (see Privacy), so "checked by at least one stage" is the largest number of files any stage that ran was given. That makes coverage a **lower bound**: two stages that checked different files count only the bigger set. A whole-project command that ran (`tsc --noEmit`, no `{files}`) counts every changed file as checked.
+- **Verification coverage**: the changed files checked by at least one stage that *ran* (result `pass` or `fail`), divided by the changed files, from the session's **last** gate run, ignoring a `gave-up` run (it executed nothing on purpose; the stops before it, on the same tree, are what was checked). "Changed files" are the ones the checks can see: deleted files and `.harness/` files aren't counted. With none it prints `n/a`, not 100%; if files changed but no stage ran it prints `0%` and says `no checks ran`. The log has no file paths (see Privacy), so "checked by at least one stage" is the largest number of files any stage that ran was given. That makes coverage a **lower bound**: two stages that checked different files count only the bigger set. A command that runs without paths (`tsc --noEmit`, no `{files}`) counts the changed files in its scope: all of them, or only those matching its `files` filter and `cwd`.
 - **Caught**: Stop-gate runs that blocked, in a session where a later run passed, counted by the stage that failed. A block with no later pass in the log (the agent gave up, or the session ended) isn't counted.
 - **Gate final outcome**: the outcome of the session's last gate run: `pass`, `block`, `nothing-ran`, `gave-up` or `deadline`. `nothing-ran` means every stage was skipped, which is not a pass.
 - **Stops, blocks**: gate runs, and those that blocked. A stop with no new changes since the last pass isn't a gate run and isn't recorded.
@@ -211,6 +211,7 @@ The log is local: it stays in `.harness/state/` (which ignores itself in git), i
 - Coverage is a lower bound (above).
 - **Escapes aren't measured**: problems found after the gate passed (CI failures, review findings, reverts) aren't linked back to a session. Without them there's no way to say how many problems the checks missed.
 - Only the Stop gate's runs count toward coverage. Work the agent verified by itself, or a `harness verify` run by hand, isn't recorded.
+- Volume: each guard check is recorded, allows included, so a very long session can pass 1 MiB and have its oldest half trimmed (undercounting `caught`). A concurrent hook can lose a line when the file is trimmed. Recording also creates `.harness/state/` (with its self-ignoring `.gitignore`) in a project that has no config.
 - Sessions are told apart by the session id Claude Code sends; a hook that doesn't send one is recorded without it and shown as `(none)`.
 
 ## Known limitations

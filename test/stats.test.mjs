@@ -51,6 +51,38 @@ test("coverage uses the LAST gate entry of the session", () => {
   assert.deepEqual(s.stages.map((x) => [x.name, x.state, x.filesChecked]), [["lint", "pass", 5], ["test", "pass", 5]]);
 });
 
+test("a gave-up run is not what was checked: coverage and stages come from the run before it", () => {
+  reset();
+  const s = summarizeSession("s", [
+    gate("block", 10, [stage("lint", "pass", 10), stage("test", "fail", 4)]),
+    gate("block", 10, [stage("lint", "pass", 10), stage("test", "fail", 6)]),
+    gate("gave-up", 10, [stage("lint", "skipped"), stage("test", "skipped")]),
+  ]);
+  assert.deepEqual(s.coverage, { percent: 100, checked: 10, changed: 10, noChecksRan: false });
+  assert.deepEqual(s.stages.map((x) => [x.name, x.state, x.filesChecked]), [["lint", "pass", 10], ["test", "fail", 6]]);
+  assert.deepEqual(s.gate, { stops: 3, blocks: 2, final: "gave-up" }, "the final outcome is still the last run's");
+  // With nothing before it, a gave-up is all there is.
+  reset();
+  assert.equal(summarizeSession("s", [gate("gave-up", 3, [stage("lint", "skipped")])]).coverage.noChecksRan, true);
+  // A deadline run did execute what it reached: its own stages count.
+  reset();
+  assert.equal(summarizeSession("s", [gate("block", 10, [stage("lint", "fail", 10)]), gate("deadline", 10, [stage("lint", "pass", 5), stage("test", "timeout", 10)])]).coverage.percent, 50);
+});
+
+test("names from a hand-edited log are only names: constructor and __proto__ don't corrupt the counts", () => {
+  reset();
+  const s = summarizeSession("s", [
+    e("guard-bash", { verdict: "deny", rule: "constructor" }),
+    e("guard-bash", { verdict: "deny", rule: "constructor" }),
+    e("guard-bash", { verdict: "deny", rule: "__proto__" }),
+    gate("block", 1, [stage("toString", "fail", 1)]),
+    gate("pass", 1, [stage("lint", "pass", 1)]),
+  ]);
+  assert.equal(s.guards.bashRules.constructor, 2);
+  assert.equal(s.guards.bashDenies, 3);
+  assert.deepEqual(s.caught, { total: 1, byStage: { toString: 1 } });
+});
+
 test("caught: blocks that a later pass followed, counted by the failed stage", () => {
   const block = (name, result = "fail") => gate("block", 2, [stage("lint", name === "lint" ? result : "pass", 2), stage("test", name === "test" ? result : "skipped", name === "test" ? 2 : 0)]);
   const cases = [
@@ -226,6 +258,12 @@ test("parseSince: durations and ISO dates; anything else is null", () => {
     ["1h", "2026-11-22T11:00:00.000Z"],
     ["2026-11-20", "2026-11-20T00:00:00.000Z"],
     ["2026-11-20T08:30:00Z", "2026-11-20T08:30:00.000Z"],
+    ["2026-11-20T08:30:00", "2026-11-20T08:30:00.000Z"],
+    ["2026-11-20 08:30", "2026-11-20T08:30:00.000Z"],
+    ["2026-11-20T08:30:00+02:00", "2026-11-20T06:30:00.000Z"],
+    ["2026-11-31", null],
+    ["2026-02-30", null],
+    ["2026-11-20T25:00:00Z", null],
     ["yesterday", null],
     ["7", null],
     ["7w", null],

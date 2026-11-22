@@ -3,15 +3,15 @@
 Status: IN_PROGRESS
 Branch: rajiatha/harness-stats
 PR: https://github.com/rajitharx/jj-harness/pull/9
-Last checkpoint: 2026-11-22 — PR #9 opened; awaiting separate reviewer (Hawkeye).
-Next action: Get the PR #9 diff reviewed by a separate agent; fix blocking findings, re-review; when clean checkout the branch, npm test, `gh pr merge 9 --squash --delete-branch`, git checkout main && git pull, set Status: DONE and bootout the launchd job.
+Last checkpoint: 2026-11-22 — review round 1 fixed (468 tests); awaiting re-review.
+Next action: Re-review PR #9 with a separate agent; if clean: checkout branch, npm test, `gh pr merge 9 --squash --delete-branch`, git checkout main && git pull, Status: DONE, launchctl bootout (job was never loaded; confirm gone).
 
 ## Checklist
 - [x] Step 0 — clean main, branch, resume file, auto-resume files written (launchd NOT loaded: needs user "yes")
 - [x] Step 1 — plan (ROADMAP row + checklist, plan below)
 - [x] Step 2 — recording metrics code (`lib/metrics.mjs`, `lib/state.mjs`, runHook, all 5 policies); its tests are in Step 4
 - [x] Step 3 — `stats` command + `skills/stats/SKILL.md`
-- [x] Step 4 — tests (463 passing)
+- [x] Step 4 — tests (468 passing)
 - [x] Step 5 — docs (README, CHANGELOG, ROADMAP, rationale)
 - [ ] Step 6 — verify, commit, PR, separate review, merge, DONE
 
@@ -29,6 +29,7 @@ Next action: Get the PR #9 diff reviewed by a separate agent; fix blocking findi
 - `changedFiles` in a verify-gate entry = files the stages can see (`stageFiles`: not deleted, not `.harness/`), so coverage's denominator isn't inflated by files no stage can check.
 - verify-gate records: pass, nothing-ran, block, gave-up, deadline. Not recorded: `unchanged` (silent path) and the two fail-open paths (unreadable/unsaveable attempt counter).
 - guard-bash rules got stable ids; `blockedCommands` hits use the id `blockedCommands`.
+- Review round 1 (Hawkeye): coverage uses `checkedCount` (distinct files a stage covered, new in `runStage`/`planStage`), and ignores a `gave-up` entry when picking the entry for coverage/stages (departs from the spec's literal "LAST entry"). Allows stay recorded (spec); volume/state-dir side effects documented as known gaps.
 - The launchd job is written but not loaded: this session is non-interactive so the user's "yes" could not be asked for.
 
 ## Original prompt

@@ -518,7 +518,7 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - README "Stats" section (definitions, `--json` keys, privacy, known gaps), CHANGELOG, rationale ("Measuring the harness", next step: escape tracking).
 
 **Verified**
-- `npm test`: 463/463 passing (416 on `main`).
+- `npm test`: 468/468 passing (416 on `main`).
   - `test/metrics.test.mjs` (new): round trip, filters, malformed/unknown-`v` lines, rotation keeps the newest half as valid JSONL, unwritable state dir and log (no throw, one stderr line, nothing on stdout), the whitelist (a deny of a command with a fake token stores only the rule id), every guard-bash rule id.
   - `test/stats.test.mjs` (new): coverage table (`n/a`, `no checks ran`, lower bound, cap, rounding), caught counting, gate outcomes incl. gave-up and deadline, the human block (equal to the example in the task), multi-session `--since`, `--json` keys, `parseSince`.
   - `test/cli.test.mjs`: `stats` with no data, fixture data, `--session`, `--since`, a damaged log, nine bad-flag cases and an unreadable state dir (exit 2).
@@ -539,5 +539,12 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 **Known gaps**
 - Coverage is a lower bound (no paths are stored, so it is the largest set any one stage checked).
 - Escapes (problems found after the gate passed: CI, reviewers, reverts) aren't measured; that's the next step in the rationale.
-- Only the Stop gate counts toward coverage; a manual `verify` isn't recorded. A gave-up or deadline gate run, being the last entry, shows `0%` and `no checks ran`, which describes that run but not the earlier blocks.
+- Only the Stop gate counts toward coverage; a manual `verify` isn't recorded. A `deadline` run that never reached a stage shows `0%` and `no checks ran`, which describes that run.
+- Every guard check is recorded (allows too, as the task asked), so a very long session can pass 1 MiB and lose its oldest half, undercounting `caught`; recording also creates `.harness/state/` in projects without a config.
 - Two concurrent hook processes can race on a rotation and lose a line; accepted for a local log.
+
+**Review round 1** (PR #9, reviewer Hawkeye: no blockers, three should-fix)
+- Coverage was overstated for a command that takes no paths but has a `files` filter or a `cwd` (`eslint .` filtered to `.ts` counted every changed file). `planStage` now also returns the root-relative paths a command covers, and `runStage` reports `checkedCount`, the distinct files covered across a stage's entries (overlapping entries count once). The gate records that as `filesChecked`. Tests: `runStage` `checkedCount` table, the gate's filtered whole-project case.
+- After `gave-up` the last gate entry has every stage skipped, so coverage read `0% (no checks ran)` right after real checks. Coverage and stages now come from the last run that isn't a `gave-up` (the final outcome still is the last run's). Test: block, block, gave-up. This departs from the task's "LAST verify-gate entry"; recorded in the README and rationale.
+- Volume and rotation: kept recording allows (the task asks for them); documented the trim and the state-dir side effect as known gaps rather than dropping data `stats` doesn't yet use.
+- Nits fixed: `--since` rejects `2026-11-31` and reads an offset-less time as UTC; inherited names (`constructor`, `__proto__`) can't be policies or counter keys; a test ties each registered policy's function name to its metrics id. Not changed: the rotation race (documented).

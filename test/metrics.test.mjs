@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MAX_BYTES, readMetrics, recordMetric } from "../lib/metrics.mjs";
+import { MAX_BYTES, METRIC_POLICIES, readMetrics, recordMetric } from "../lib/metrics.mjs";
+import { POLICIES } from "../hooks/policies/index.mjs";
 import { loadConfig } from "../lib/config.mjs";
 import { guardBash } from "../hooks/policies/guard-bash.mjs";
 import { runHook } from "../lib/harness.mjs";
@@ -178,6 +179,17 @@ test("privacy: only whitelisted, short identifier fields are stored", () => {
   assert.deepEqual({ ...bash, ts: undefined }, { v: 1, ts: undefined, session: null, event: "PreToolUse", policy: "guard-bash", verdict: "deny" });
   assert.deepEqual(gate.stages, [{ name: "lint", configured: true, ran: true, result: "fail", filesChecked: 1, ms: 5 }]);
   assert.equal(gate.fingerprint, undefined);
+});
+
+test("every registered policy's function name maps to a metrics policy id (runHook derives the id from it)", () => {
+  const ids = Object.values(POLICIES).flat().map((policy) => policy.name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`));
+  assert.deepEqual([...ids].sort(), [...METRIC_POLICIES].sort());
+});
+
+test("inherited names are not policies", () => {
+  const root = makeProject();
+  for (const policy of ["constructor", "__proto__", "toString"]) assert.equal(recordMetric(root, { event: "Stop", policy }, quiet), false, policy);
+  assert.deepEqual(readMetrics(root), []);
 });
 
 test("privacy: a guard-bash deny of a command with a fake secret logs the rule id and nothing of the command", async () => {

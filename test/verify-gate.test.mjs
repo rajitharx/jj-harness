@@ -439,6 +439,15 @@ test("metrics: every outcome records the stages, the files each checked and the 
       expected: { outcome: "pass", attempt: 1, changedFiles: 2, stages: [["lint", true, true, "pass", 1], ["typecheck", false, false, "skipped", 0], ["test", true, true, "pass", 2]] },
     },
     {
+      name: "pass: a whole-project command with a files filter covers only the files that match it",
+      root: () => {
+        const r = repo({ lint: { run: "exit 0", files: ["src/**/*.ts"] } });
+        writeFile(r, "README.md", "changed\n");
+        return r;
+      },
+      expected: { outcome: "pass", attempt: 1, changedFiles: 2, stages: [["lint", true, true, "pass", 1], ["typecheck", false, false, "skipped", 0], ["test", false, false, "skipped", 0]] },
+    },
+    {
       name: "block: the failing stage is recorded as fail and later stages did not run",
       root: () => repo({ lint: FAIL, test: PASS }),
       expected: { outcome: "block", attempt: 1, changedFiles: 1, stages: [["lint", true, true, "fail", 1], ["typecheck", false, false, "skipped", 0], ["test", true, false, "skipped", 0]] },

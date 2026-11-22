@@ -22,3 +22,9 @@
 - Next: Step 6, push, PR, separate review, merge
 - Open questions: launchd job still not loaded (needs user's yes)
 - Gotchas: none
+## 2026-11-22 rajiatha/harness-stats: stats review round 1
+- Done: fixed Hawkeye's should-fix items (checkedCount, gave-up coverage), nits; 468 tests green; PR #9
+- In progress: awaiting re-review
+- Next: re-review, merge, set Status DONE
+- Open questions: launchd job never loaded (needs user's yes); can stay unloaded
+- Gotchas: never write `**/` inside a JSDoc block comment: it ends the comment
