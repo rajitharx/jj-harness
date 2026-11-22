@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { runHook } from "../lib/harness.mjs";
+import { readMetrics } from "../lib/metrics.mjs";
 import { makeProject } from "./helpers.mjs";
 
 const allow = () => ({ kind: "allow" });
@@ -180,4 +183,60 @@ test("unknown event is ignored", async () => {
   const r = await runHook("Nope", {}, { policies: {}, log: (m) => logs.push(m) });
   assert.deepEqual(r, { exitCode: 0, output: {} });
   assert.match(logs[0], /unknown hook event/);
+});
+
+// ---------------------------------------------------------------- metrics
+
+// runHook names a policy's metrics after its function: guardBash -> guard-bash.
+const guardBash = () => ({ kind: "block", reason: "no rm", metrics: { verdict: "deny", rule: "rm-rf-dangerous" } });
+const sessionContext = () => ({ kind: "context", text: "ctx", metrics: {} });
+const logFile = (root) => join(root, ".harness", "state", "metrics.jsonl");
+
+test("metrics: a verdict's metrics are recorded with the event, the policy id and the session", async () => {
+  const cwd = makeProject();
+  await runHook("PreToolUse", { cwd, session_id: "s1" }, { policies: { PreToolUse: [guardBash, allow] }, log: () => {} });
+  await runHook("SessionStart", { cwd }, { policies: { SessionStart: [sessionContext] }, log: () => {} });
+  assert.deepEqual(readMetrics(cwd).map(({ ts, ...e }) => e), [
+    { v: 1, session: "s1", event: "PreToolUse", policy: "guard-bash", verdict: "deny", rule: "rm-rf-dangerous" },
+    { v: 1, session: null, event: "SessionStart", policy: "session-context" },
+  ]);
+});
+
+test("metrics: a verdict without metrics records nothing, and a malformed metrics value is ignored", async () => {
+  const cases = { none: allow, string: () => ({ kind: "allow", metrics: "x" }), array: () => ({ kind: "allow", metrics: [1] }), null: () => ({ kind: "allow", metrics: null }) };
+  for (const [name, policy] of Object.entries(cases)) {
+    const cwd = makeProject();
+    const r = await run("PreToolUse", [policy], { cwd });
+    assert.deepEqual(r, { exitCode: 0, output: {} }, name);
+    assert.deepEqual(readMetrics(cwd), [], name);
+  }
+});
+
+test("metrics: a failing log changes no hook output, and logs one stderr line per failure", async () => {
+  const list = { PreToolUse: [guardBash, allow], SessionStart: [sessionContext] };
+  const outputs = async (cwd, logs) => [
+    await runHook("PreToolUse", { cwd, session_id: "s" }, { policies: list, log: (m) => logs.push(m) }),
+    await runHook("SessionStart", { cwd }, { policies: list, log: (m) => logs.push(m) }),
+  ];
+  const healthy = await outputs(makeProject(), []);
+
+  const broken = makeProject();
+  mkdirSync(logFile(broken), { recursive: true }); // appends fail with EISDIR
+  const logs = [];
+  assert.deepEqual(await outputs(broken, logs), healthy);
+  assert.equal(logs.length, 2);
+  assert.ok(logs.every((m) => /^metrics: could not record/.test(m)), logs.join("\n"));
+
+  const blocked = makeProject();
+  mkdirSync(join(blocked, ".harness"));
+  writeFileSync(join(blocked, ".harness", "state"), "a file where the directory should be");
+  assert.deepEqual(await outputs(blocked, []), healthy);
+});
+
+test("metrics: a throwing recorder path never turns a verdict into an allow", async () => {
+  // A hostile `metrics` object whose getters throw must not change the block.
+  const hostile = () => ({ kind: "block", reason: "no", metrics: new Proxy({}, { ownKeys() { throw new Error("boom"); }, get() { throw new Error("boom"); } }) });
+  const logs = [];
+  const r = await run("PreToolUse", [hostile], { logs });
+  assert.equal(r.output.hookSpecificOutput.permissionDecision, "deny");
 });

@@ -10,3 +10,9 @@
 - Next: Step 3, lib/stats.mjs + `stats` command + skills/stats
 - Open questions: launchd job still not loaded (needs user's yes)
 - Gotchas: policy tests use bare() from test/helpers.mjs to ignore `metrics`
+## 2026-11-22 rajiatha/harness-stats: stats steps 3-4 (command, skill, tests)
+- Done: lib/stats.mjs, `stats` CLI, skills/stats, tests (463 pass), e2e replays a session and checks `stats --json`
+- In progress: nothing half-done
+- Next: Step 5 docs (README, CHANGELOG, ROADMAP log, rationale), then Step 6 PR + separate review
+- Open questions: launchd job still not loaded (needs user's yes)
+- Gotchas: stats times are UTC; coverage is a lower bound (no paths stored)

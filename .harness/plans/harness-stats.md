@@ -3,15 +3,15 @@
 Status: IN_PROGRESS
 Branch: rajiatha/harness-stats
 PR: (not opened yet)
-Last checkpoint: 2026-11-22 — Step 2 code done, 416 existing tests green (policy tests now use `bare()` to ignore `metrics`).
-Next action: Step 3 — write `lib/stats.mjs` (pure aggregation), the `stats` command in `bin/harness.mjs`, and `skills/stats/SKILL.md` (+ `test/skills.test.mjs` list).
+Last checkpoint: 2026-11-22 — Steps 2–4 done: metrics, stats lib/CLI/skill, tests; npm test 463/463, plugin validate passes.
+Next action: Step 5 — docs: README Stats section (+ skills table, CLI paragraph, known gaps), CHANGELOG [Unreleased], ROADMAP ticks and completion log, rationale section + Next implementation step.
 
 ## Checklist
 - [x] Step 0 — clean main, branch, resume file, auto-resume files written (launchd NOT loaded: needs user "yes")
 - [x] Step 1 — plan (ROADMAP row + checklist, plan below)
 - [x] Step 2 — recording metrics code (`lib/metrics.mjs`, `lib/state.mjs`, runHook, all 5 policies); its tests are in Step 4
-- [ ] Step 3 — `stats` command + `skills/stats/SKILL.md`
-- [ ] Step 4 — tests
+- [x] Step 3 — `stats` command + `skills/stats/SKILL.md`
+- [x] Step 4 — tests (463 passing)
 - [ ] Step 5 — docs (README, CHANGELOG, ROADMAP, rationale)
 - [ ] Step 6 — verify, commit, PR, separate review, merge, DONE
 

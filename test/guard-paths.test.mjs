@@ -114,3 +114,11 @@ test("glob semantics: **, *, ? and dot-files", async () => {
     assert.equal((await edit(path, { cwd: r, c })).kind, kind, path);
   }
 });
+
+test("metrics: a deny names the rule, an allow says allow, and non-edit calls record nothing", async () => {
+  assert.deepEqual((await editRaw(".env")).metrics, { verdict: "deny", rule: "protectedPaths" });
+  assert.deepEqual((await editRaw("src/a.ts")).metrics, { verdict: "allow" });
+  assert.equal((await guardPaths({ tool_name: "Bash", tool_input: { command: "ls" } }, config)).metrics, undefined);
+  assert.equal((await guardPaths({ tool_name: "Edit", tool_input: {} }, config)).metrics, undefined);
+  assert.ok(!JSON.stringify((await editRaw("secrets/.env")).metrics).includes("secrets"), "no path in the metrics");
+});

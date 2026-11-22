@@ -409,3 +409,120 @@ test("silent where nothing was looked at: no changes, disabled, nothing configur
   ];
   for (const [name, root] of cases) assert.deepEqual((await stop(root)).verdict, { kind: "allow" }, name);
 });
+
+// ---------------------------------------------------------------- metrics
+
+/** The gate's metrics with the timings dropped (ms is checked separately). */
+const shape = ({ metrics }) => ({
+  outcome: metrics.outcome,
+  attempt: metrics.attempt,
+  changedFiles: metrics.changedFiles,
+  stages: metrics.stages.map(({ name, configured, ran, result, filesChecked }) => [name, configured, ran, result, filesChecked]),
+});
+
+test("metrics: every outcome records the stages, the files each checked and the attempt", async () => {
+  const slow = `node -e "setTimeout(() => {}, 30000)"`;
+  const never = { run: "exit 0 # {files}", files: ["**/*.py"] };
+  const cases = [
+    {
+      name: "pass: whole-project commands count every changed file",
+      root: () => repo({ lint: PASS, test: PASS }),
+      expected: { outcome: "pass", attempt: 1, changedFiles: 1, stages: [["lint", true, true, "pass", 1], ["typecheck", false, false, "skipped", 0], ["test", true, true, "pass", 1]] },
+    },
+    {
+      name: "pass: a stage with a files filter counts only the files it was given",
+      root: () => {
+        const r = repo({ lint: { run: "exit 0 # {files}", files: ["src/**/*.ts"] }, test: PASS });
+        writeFile(r, "README.md", "changed\n");
+        return r;
+      },
+      expected: { outcome: "pass", attempt: 1, changedFiles: 2, stages: [["lint", true, true, "pass", 1], ["typecheck", false, false, "skipped", 0], ["test", true, true, "pass", 2]] },
+    },
+    {
+      name: "block: the failing stage is recorded as fail and later stages did not run",
+      root: () => repo({ lint: FAIL, test: PASS }),
+      expected: { outcome: "block", attempt: 1, changedFiles: 1, stages: [["lint", true, true, "fail", 1], ["typecheck", false, false, "skipped", 0], ["test", true, false, "skipped", 0]] },
+    },
+    {
+      name: "block on a timeout",
+      root: () => repo({ test: slow }, { timeoutSec: 1 }),
+      expected: { outcome: "block", attempt: 1, changedFiles: 1, stages: [["lint", false, false, "skipped", 0], ["typecheck", false, false, "skipped", 0], ["test", true, true, "timeout", 1]] },
+    },
+    {
+      name: "nothing-ran: every stage skipped",
+      root: () => repo({ lint: never, test: never }),
+      expected: { outcome: "nothing-ran", attempt: 1, changedFiles: 1, stages: [["lint", true, false, "skipped", 0], ["typecheck", false, false, "skipped", 0], ["test", true, false, "skipped", 0]] },
+    },
+    {
+      name: "changedFiles leaves out deleted files and harness files",
+      root: () => {
+        const r = repo({ lint: PASS });
+        rmSync(join(r, "README.md"));
+        writeFile(r, ".harness/progress.md", "notes\n");
+        return r;
+      },
+      expected: { outcome: "pass", attempt: 1, changedFiles: 1, stages: [["lint", true, true, "pass", 1], ["typecheck", false, false, "skipped", 0], ["test", false, false, "skipped", 0]] },
+    },
+  ];
+  for (const { name, root, expected } of cases) {
+    const r = root();
+    touch(r);
+    const result = await stop(r);
+    assert.deepEqual(shape(result), expected, name);
+    assert.match(result.metrics.fingerprint, /^[0-9a-f]{64}$/, name);
+    assert.ok(result.metrics.stages.every((s) => Number.isInteger(s.ms) && s.ms >= 0), name);
+  }
+});
+
+test("metrics: gave-up and deadline outcomes", async () => {
+  const root = repo({ lint: FAIL }, { maxAttempts: 1 });
+  touch(root);
+  assert.equal((await stop(root)).metrics.outcome, "block");
+  const gaveUp = await stop(root);
+  assert.deepEqual(shape(gaveUp), {
+    outcome: "gave-up",
+    attempt: 2,
+    changedFiles: 1,
+    stages: [["lint", true, false, "skipped", 0], ["typecheck", false, false, "skipped", 0], ["test", false, false, "skipped", 0]],
+  });
+
+  const slow = repo({ lint: PASS, test: `node -e "setTimeout(() => {}, 30000)"` });
+  touch(slow);
+  assert.deepEqual(shape(await stop(slow, { deadlineMs: 1500 })).stages, [["lint", true, true, "pass", 1], ["typecheck", false, false, "skipped", 0], ["test", true, true, "timeout", 1]]);
+  const early = await stop(slow, { deadlineMs: 0 });
+  assert.equal(early.metrics.outcome, "deadline");
+  assert.equal(early.metrics.stages.find((s) => s.name === "lint").ran, false, "no stage started after the deadline");
+});
+
+test("metrics: attempt counts the stops since the last pass, and the pass after blocks records it", async () => {
+  const root = repo({ test: `test -f ok.flag` });
+  touch(root);
+  assert.equal((await stop(root)).metrics.attempt, 1);
+  assert.equal((await stop(root, { stop_hook_active: true })).metrics.attempt, 2);
+  writeFile(root, "ok.flag", "");
+  const pass = await stop(root, { stop_hook_active: true });
+  assert.deepEqual([pass.metrics.outcome, pass.metrics.attempt], ["pass", 3]);
+});
+
+test("metrics: the silent paths record nothing", async () => {
+  const unchanged = repo({ test: PASS });
+  touch(unchanged);
+  assert.equal((await stop(unchanged)).metrics.outcome, "pass");
+  assert.equal((await stop(unchanged)).metrics, undefined, "no new changes since the last pass");
+  assert.equal((await stop(repo({ test: PASS }))).metrics, undefined, "clean tree");
+  const none = repo({});
+  touch(none);
+  assert.equal((await stop(none)).metrics, undefined, "nothing configured");
+  const unreadable = repo({ test: FAIL });
+  touch(unreadable);
+  mkdirSync(join(unreadable, ".harness/state/verify-gate.json"), { recursive: true });
+  assert.equal((await stop(unreadable, { stop_hook_active: true })).metrics, undefined, "unreadable counter");
+});
+
+test("metrics: carry no paths, output or commands", async () => {
+  const root = repo({ lint: FAIL });
+  touch(root);
+  const { metrics } = await stop(root);
+  const text = JSON.stringify(metrics);
+  for (const leak of ["a.ts", "src/", "boom", "first line", "echo", root]) assert.ok(!text.includes(leak), `"${leak}"`);
+});

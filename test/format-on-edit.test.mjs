@@ -76,3 +76,29 @@ test("a formatter failure comes back as context with the output tail, never a bl
   assert.match(v.text, /SyntaxError: unexpected token/);
   assert.ok(v.text.length < 2048);
 });
+
+test("metrics: ok, failed, timeout and skipped results with a duration; nothing when it does not apply", async () => {
+  const cases = [
+    ["ok", "sh fmt.sh", {}],
+    ["failed", "sh fmt.sh; exit 3", {}],
+    ["timeout", `node -e "setTimeout(() => {}, 30000)"`, { formatTimeoutSec: 1 }],
+  ];
+  for (const [result, format, extra] of cases) {
+    const rec = recorder();
+    const root = makeProject({ verify: { format }, ...extra });
+    writeFile(root, "fmt.sh", rec.script);
+    writeFile(root, "src/a.ts", "x\n");
+    const verdict = await editRaw(loadConfig(root), "src/a.ts");
+    assert.equal(verdict.metrics.result, result);
+    assert.ok(Number.isInteger(verdict.metrics.ms) && verdict.metrics.ms >= 0, result);
+    assert.deepEqual(Object.keys(verdict.metrics).sort(), ["ms", "result"]);
+  }
+  const skipped = makeProject({ verify: { format: { run: "exit 1", files: ["**/*.py"] } } });
+  writeFile(skipped, "src/a.ts", "x\n");
+  assert.equal((await editRaw(loadConfig(skipped), "src/a.ts")).metrics.result, "skipped", "the files filter matched nothing");
+
+  const { config } = setup("sh fmt.sh");
+  assert.equal((await editRaw(config, "src/gone.ts")).metrics, undefined, "file missing");
+  assert.equal((await formatOnEdit({ tool_name: "Read", tool_input: { file_path: "src/a b.ts" } }, config)).metrics, undefined, "other tool");
+  assert.equal((await editRaw(setup(undefined).config, "src/a b.ts")).metrics, undefined, "no formatter configured");
+});

@@ -75,3 +75,9 @@ test("leaves out git lines when the project is not a git repo", async () => {
   assert.doesNotMatch(text, /Branch:|Dirty files|Working tree/);
   assert.match(text, /- test: npm test/);
 });
+
+test("marks the session start for the metrics log", async () => {
+  const root = makeRepo();
+  const verdict = await sessionContext({ cwd: root }, loadConfig(root));
+  assert.deepEqual(verdict.metrics, {});
+});

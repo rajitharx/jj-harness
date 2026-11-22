@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "../lib/config.mjs";
+import { recordMetric } from "../lib/metrics.mjs";
 import { git, makeRepo, writeFile } from "./helpers.mjs";
 
 const CLI = fileURLToPath(new URL("../bin/harness.mjs", import.meta.url));
@@ -356,4 +357,121 @@ test("verify --base: a bad ref, a missing value or --all with --base exits 2 wit
   const orphan = await cli(root, "verify", "--base", "lonely");
   assert.equal(orphan.code, 2);
   assert.match(orphan.stderr, /no common ancestor/);
+});
+
+// ---------------------------------------------------------------- stats
+
+const stage = (name, result, filesChecked) => ({ name, configured: true, ran: result === "pass" || result === "fail", result, filesChecked, ms: 4 });
+const fp = "a".repeat(64);
+/** Write metric entries as if recorded at `iso`. */
+const record = (root, iso, entry) => recordMetric(root, entry, { now: new Date(iso), log: () => {} });
+const gate = (session, outcome, changedFiles, stages) => ({ event: "Stop", policy: "verify-gate", session, fingerprint: fp, changedFiles, stages, outcome, attempt: 1 });
+
+function statsFixture() {
+  const root = makeRepo();
+  const day = (d, t) => `2026-11-${d}T${t}:00Z`;
+  record(root, day("20", "09:00"), { event: "SessionStart", policy: "session-context", session: "old-session" });
+  record(root, day("20", "09:05"), gate("old-session", "pass", 4, [stage("lint", "pass", 4)]));
+  record(root, day("22", "07:40"), { event: "SessionStart", policy: "session-context", session: "new-session" });
+  record(root, day("22", "07:50"), gate("new-session", "block", 10, [stage("lint", "fail", 8)]));
+  record(root, day("22", "08:00"), gate("new-session", "pass", 10, [stage("lint", "pass", 8), stage("test", "pass", 6)]));
+  return root;
+}
+
+test("stats: no data is exit 0 with one line, in text and JSON modes", async () => {
+  const root = makeRepo();
+  assert.deepEqual(await cli(root, "stats"), { code: 0, stdout: "stats: no data\n", stderr: "" });
+  const json = await cli(root, "stats", "--json");
+  assert.equal(json.code, 0);
+  assert.deepEqual(JSON.parse(json.stdout).sessions, []);
+  assert.equal((await cli(root, "stats", "--session", "nope")).stdout, "stats: no data\n");
+  assert.equal((await cli(root, "stats", "--since", "24h")).stdout, "stats: no data\n");
+});
+
+test("stats: the default reports the most recent session that has a gate run", async () => {
+  const root = statsFixture();
+  const r = await cli(root, "stats");
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stderr, "");
+  assert.equal(
+    r.stdout,
+    [
+      "harness stats — session new-sess… (2026-11-22 07:40 → 08:00 UTC)",
+      "verification coverage   80%  (8/10 changed files checked by ≥1 stage)",
+      "stages                  lint ✓ 8/10 · test ✓ 6/10",
+      "gate                    2 stops · 1 block · final: pass after 1 block",
+      "caught                  1 failure fixed before stop (lint 1)",
+      "format-on-edit          no edits recorded",
+      "guards                  0 bash denies · 0 path denies",
+      "",
+    ].join("\n"),
+  );
+  assert.equal((await cli(root, "stats", "--last")).stdout, r.stdout);
+});
+
+test("stats: --session picks one session, --json has the documented shape", async () => {
+  const root = statsFixture();
+  const r = await cli(root, "stats", "--session", "old-session", "--json");
+  assert.equal(r.code, 0, r.stderr);
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.scope, "session");
+  assert.deepEqual(report.sessions.map((s) => s.session), ["old-session"]);
+  assert.deepEqual(report.sessions[0].coverage, { percent: 100, checked: 4, changed: 4, noChecksRan: false });
+  assert.equal((await cli(root, "stats", "--session=old-session", "--json")).stdout, r.stdout, "--opt=value works");
+});
+
+test("stats: --since reports totals and a line per session", async () => {
+  const root = statsFixture();
+  const r = await cli(root, "stats", "--since", "2026-11-01");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /^harness stats: 2 sessions$/m);
+  assert.match(r.stdout, /^gate {20}3 stops · 1 block$/m);
+  assert.match(r.stdout, /^ {2}old-sess… .*coverage 100% · 1 stop · 0 blocks · final pass · caught 0$/m);
+  assert.match(r.stdout, /^ {2}new-sess… .*coverage 80% · 2 stops · 1 block · final pass · caught 1$/m);
+  const only = JSON.parse((await cli(root, "stats", "--since", "2026-11-21", "--json")).stdout);
+  assert.deepEqual(only.sessions.map((s) => s.session), ["new-session"]);
+  assert.equal(only.scope, "since");
+});
+
+test("stats: skips a damaged log line and reads the rest", async () => {
+  const root = statsFixture();
+  const file = join(root, ".harness/state/metrics.jsonl");
+  writeFileSync(file, `garbage\n{"v":9,"ts":"2026-11-22T09:00:00Z"}\n${readFileSync(file, "utf8")}`);
+  const r = await cli(root, "stats");
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /session new-sess…/);
+});
+
+test("stats: usage errors and an unreadable state dir are exit 2", async () => {
+  const root = statsFixture();
+  const cases = [
+    [["stats", "--bogus"], /unknown argument --bogus/],
+    [["stats", "extra"], /unknown argument extra/],
+    [["stats", "--session"], /--session needs a value/],
+    [["stats", "--since"], /--since needs a value/],
+    [["stats", "--session", "a", "--session", "b"], /--session given twice/],
+    [["stats", "--since", "last week"], /--since needs a duration/],
+    [["stats", "--since", "7d", "--last"], /--last and --since can't be combined/],
+    [["stats", "--session", "x", "--since", "7d"], /--session and --since can't be combined/],
+    [["stats", "--last", "--session", "x"], /--last and --session can't be combined/],
+  ];
+  for (const [args, message] of cases) {
+    const r = await cli(root, ...args);
+    assert.equal(r.code, 2, args.join(" "));
+    assert.equal(r.stdout, "", args.join(" "));
+    assert.match(r.stderr, message, args.join(" "));
+    assert.match(r.stderr, /usage: harness\.mjs/, args.join(" "));
+  }
+  const broken = makeRepo();
+  mkdirSync(join(broken, ".harness/state/metrics.jsonl"), { recursive: true });
+  const r = await cli(broken, "stats");
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /stats: could not read the metrics log/);
+  assert.equal(r.stdout, "");
+});
+
+test("stats: runs from a subdirectory of the project", async () => {
+  const root = statsFixture();
+  mkdirSync(join(root, "src"));
+  assert.match((await cli(join(root, "src"), "stats")).stdout, /session new-sess…/);
 });
