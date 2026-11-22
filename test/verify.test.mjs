@@ -145,9 +145,30 @@ test("runStage reports how many files the command was given, and none for whole-
   assert.deepEqual(planStage("lint", config.verify.lint, files), {
     command: "node argv.cjs a.ts src/b.ts",
     fileCount: 2,
+    checked: ["a.ts", "src/b.ts"],
   });
-  assert.deepEqual(planStage("typecheck", config.verify.typecheck, files), { command: "node argv.cjs" });
+  // No placeholder: no fileCount (nothing is passed), but the filter still says what it covers.
+  assert.deepEqual(planStage("typecheck", config.verify.typecheck, files), { command: "node argv.cjs", checked: ["a.ts", "src/b.ts"] });
   assert.equal(planStage("typecheck", config.verify.typecheck, ["README.md"]), null);
+});
+
+test("runStage reports checkedCount: the distinct changed files a stage covered, with or without paths", async () => {
+  const files = ["a.ts", "src/b.ts", "README.md", "docs/x.md"];
+  const cases = [
+    ["{files} with a filter", { run: "node argv.cjs {files}", files: ["**/*.ts"] }, 2],
+    ["a whole-project command with a filter covers only the matching files", { run: "node argv.cjs", files: ["**/*.ts"] }, 2],
+    ["a whole-project command with no filter covers every changed file", "node argv.cjs", 4],
+    ["entries that overlap count each file once", [{ run: "node argv.cjs", files: ["**/*.ts"] }, { run: "node argv.cjs {files}", files: ["src/**"] }], 2],
+    ["entries that don't overlap add up", [{ run: "node argv.cjs {files}", files: ["**/*.ts"] }, { run: "node argv.cjs {files}", files: ["**/*.md"] }], 4],
+  ];
+  for (const [name, lint, expected] of cases) {
+    const r = await runStage("lint", project({ lint }), files);
+    assert.equal(r.checkedCount, expected, name);
+  }
+  const failing = await runStage("lint", project({ lint: [{ run: "node argv.cjs {files}", files: ["**/*.ts"] }, { run: "node -e \"process.exit(1)\"", files: ["**/*.md"] }] }), files);
+  assert.equal(failing.ok, false);
+  assert.equal(failing.checkedCount, 4, "a failing entry covered its files too");
+  assert.equal("checkedCount" in (await runStage("lint", project({ lint: "node argv.cjs {files}" }), [])), false, "a skipped stage has none");
 });
 
 test("runStage reports non-zero exits with combined output", async () => {

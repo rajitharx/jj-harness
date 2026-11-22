@@ -2,15 +2,19 @@
 // The harness CLI: the small surface the skills call.
 //   init [--write] [--force-config]   propose (or write) config, CLAUDE.md, AGENTS.md, progress.md
 //   verify [--all | --base <ref>]     run lint, typecheck and test on the changed files
+//   stats [--session <id> | --last | --since <when>] [--json]
+//                                     report what the harness did (from .harness/state/metrics.jsonl)
 // Exit codes: 0 ok (for verify, also "nothing ran", which it prints and is not a
-// pass), 1 checks failed or init refused, 2 usage, config or git error
-// (including an unknown --base ref).
+// pass; for stats, also "no data"), 1 checks failed or init refused, 2 usage,
+// config, git or state-dir error (including an unknown --base ref).
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_PATH, ConfigError, PROGRESS_PATH, defaultConfig, loadConfig, stageEntries, validateConfig } from "../lib/config.mjs";
 import { detectProject } from "../lib/detect.mjs";
 import { BaseRefError, changedFiles, trackedFiles } from "../lib/git.mjs";
+import { readMetrics } from "../lib/metrics.mjs";
+import { buildReport, parseSince, renderReport } from "../lib/stats.mjs";
 import { CHECK_STAGES, describeRun, runStage, stageFiles, tail } from "../lib/verify.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,6 +30,7 @@ const OUTPUT_TAIL = 4000;
 export const COMMANDS = {
   init: { flags: ["--write", "--force-config"], options: ["--packages"], run: init },
   verify: { flags: ["--all"], options: ["--base"], run: verify },
+  stats: { flags: ["--last", "--json"], options: ["--session", "--since"], run: stats },
 };
 export const SUBCOMMANDS = Object.keys(COMMANDS);
 
@@ -37,10 +42,16 @@ const USAGE = `usage: harness.mjs <command> [flags]
   verify [--all | --base <ref>]    run lint, typecheck and test on the files that differ from HEAD;
                                    --base <ref>: plus the files the branch changed (git diff <ref>...HEAD),
                                    for checking committed work; --all: every tracked file
+  stats [--session <id> | --last | --since <when>] [--json]
+                                   what the harness did: verification coverage, stages, gate outcomes,
+                                   failures caught, formatter results, guard denies. --last (default): the
+                                   most recent session with a gate run; --since <7d | 24h | ISO date>: every
+                                   session since then; --json: the same numbers as one object
 
 verify prints one line per stage, then "verify: passed", "verify: failed (<stages>)" or
 "verify: nothing ran". Exit codes: 0 passed, or nothing ran (no check executed, which is
-not a pass); 1 a check failed; 2 a usage, config or git error, or an unknown --base ref.`;
+not a pass); 1 a check failed; 2 a usage, config or git error, or an unknown --base ref.
+stats exits 0 after printing a report or "stats: no data", and 2 for a usage error or an unreadable state directory.`;
 
 /**
  * Run the CLI. Returns the exit code instead of exiting, so tests can call it.
@@ -292,6 +303,38 @@ async function verify(flags, { cwd, out, err, options = {} }) {
   }
   out(failed.length ? `verify: failed (${failed.join(", ")})\n` : ran ? "verify: passed\n" : "verify: nothing ran (no check executed; not a pass)\n");
   return failed.length ? 1 : 0;
+}
+
+// ---------------------------------------------------------------- stats
+
+async function stats(flags, { cwd, out, err, options = {} }) {
+  const chosen = [flags.has("--last") && "--last", "--session" in options && "--session", "--since" in options && "--since"].filter(Boolean);
+  if (chosen.length > 1) {
+    err(`stats: ${chosen.join(" and ")} can't be combined\n${USAGE}\n`);
+    return 2;
+  }
+  let since;
+  if ("--since" in options) {
+    since = parseSince(options["--since"], new Date());
+    if (!since) {
+      err(`stats: --since needs a duration like 7d or 24h, or an ISO date like 2026-11-20 (got "${options["--since"]}")\n${USAGE}\n`);
+      return 2;
+    }
+  }
+  const scope = since ? "since" : "--session" in options ? "session" : "last";
+  const root = projectRoot(cwd);
+  let entries;
+  try {
+    // Strict: an unreadable state directory is an error here, not "no data".
+    entries = readMetrics(root, { since, strict: true });
+  } catch (e) {
+    err(`stats: could not read the metrics log in ${root}/.harness/state (${String(e?.message ?? e).split("\n")[0]})\n`);
+    return 2;
+  }
+  const report = buildReport(entries, { scope, session: options["--session"] });
+  if (flags.has("--json")) out(`${JSON.stringify(report, null, 2)}\n`);
+  else out(`${renderReport(report)}\n`);
+  return 0;
 }
 
 // ---------------------------------------------------------------- entry

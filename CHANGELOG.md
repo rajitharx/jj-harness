@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **`harness stats`** reports what the harness did in a session: **verification coverage** (the share of changed files that at least one lint, typecheck or test stage ran on, a lower bound), the stage results, gate stops, blocks and final outcome, the failures it caught (blocks followed by a pass, by stage), formatter results and guard denies. `stats [--session <id> | --last | --since <7d|24h|date>] [--json]` exits 0 (also for `stats: no data`) or 2; `/harness:stats` runs it and quotes it. There is deliberately no single effectiveness percentage, and problems found after the gate passed (CI, review, reverts) aren't measured.
+- **Metrics log.** Hooks record counts and outcomes to `.harness/state/metrics.jsonl` (local, self-ignoring, trimmed to its newest half at 1 MiB). It never holds command text, output, file contents, environment values or paths. A failure to record can't change a hook's output.
+- `guard-bash` rules have stable ids (`force-push-main`, …), used by the log.
+
 ## [0.2.0] - 2026-11-21
 
 ### Added

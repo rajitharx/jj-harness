@@ -23,7 +23,7 @@ const invokedFlags = (text) =>
 const knownFlag = (sub, flag) => COMMANDS[sub] && [...COMMANDS[sub].flags, ...COMMANDS[sub].options].includes(flag);
 
 test("the plugin ships the expected skills", () => {
-  assert.deepEqual(dirs.sort(), ["handoff", "harness-init", "plan", "review", "ship", "verify"]);
+  assert.deepEqual(dirs.sort(), ["handoff", "harness-init", "plan", "review", "ship", "stats", "verify"]);
 });
 
 for (const dir of dirs) {

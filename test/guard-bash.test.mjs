@@ -6,10 +6,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "../lib/config.mjs";
 import { guardBash } from "../hooks/policies/guard-bash.mjs";
-import { makeProject } from "./helpers.mjs";
+import { bare, makeProject } from "./helpers.mjs";
 
 const config = loadConfig(makeProject());
-const bash = (command, c = config) => guardBash({ tool_name: "Bash", tool_input: { command } }, c);
+/** The policy's verdict, and the same with its `metrics` for the tests of those. */
+const bashRaw = (command, c = config) => guardBash({ tool_name: "Bash", tool_input: { command } }, c);
+const bash = async (command, c = config) => bare(await bashRaw(command, c));
 
 const MUST_BLOCK = [
   // rm -rf on root, home, cwd or bare globs
@@ -169,9 +171,9 @@ for (const command of MUST_ALLOW) {
 }
 
 test("ignores non-Bash tools and empty commands", async () => {
-  assert.deepEqual(await guardBash({ tool_name: "Write", tool_input: { command: "rm -rf /" } }, config), { kind: "allow" });
+  assert.deepEqual(bare(await guardBash({ tool_name: "Write", tool_input: { command: "rm -rf /" } }, config)), { kind: "allow" });
   assert.deepEqual(await bash(""), { kind: "allow" });
-  assert.deepEqual(await guardBash({ tool_name: "Bash" }, config), { kind: "allow" });
+  assert.deepEqual(bare(await guardBash({ tool_name: "Bash" }, config)), { kind: "allow" });
 });
 
 test("reasons suggest a safer alternative per rule", async () => {

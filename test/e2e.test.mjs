@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -172,6 +172,60 @@ test("e2e: one session through SessionStart, guards, format-on-edit and the Stop
   assert.deepEqual(calls(log).slice(-2), [["lint", ["src/a.js"]], ["test", ["src/a.js"]]]);
   assert.deepEqual(stop(ctx).out, {});
   assert.equal(calls(log).length, ran, "unchanged tree since the last pass: no stub ran again");
+
+  // 6. The session left a metrics log, and `stats` reports it. Two files changed
+  //    that the checks could see (docs/notes.md, src/a.js); lint and test got one
+  //    (the `files` filter), so coverage is 1/2. The first stop was blocked by the
+  //    test stage, the second passed, so one failure was caught.
+  const metrics = readFileSync(join(root, ".harness/state/metrics.jsonl"), "utf8");
+  assert.ok(metrics.split("\n").filter(Boolean).every((l) => JSON.parse(l).v === 1), "every line is v1 JSON");
+  for (const secret of ["rm -rf", "SECRET", "FAIL", "notes.md", "a.js", root]) assert.ok(!metrics.includes(secret), `no "${secret}" in the log`);
+  const cli = (...args) => spawnSync(process.execPath, [join(PLUGIN_ROOT, "bin", "harness.mjs"), "stats", ...args], { cwd: root, encoding: "utf8" });
+  const json = cli("--json");
+  assert.equal(json.status, 0, json.stderr);
+  const report = JSON.parse(json.stdout);
+  assert.equal(report.scope, "last");
+  assert.equal(report.sessions.length, 1);
+  const [session] = report.sessions;
+  assert.equal(session.session, "e2e-session");
+  assert.deepEqual(session.coverage, { percent: 50, checked: 1, changed: 2, noChecksRan: false });
+  assert.deepEqual(session.stages, [
+    { name: "lint", state: "pass", filesChecked: 1 },
+    { name: "typecheck", state: "not-configured", filesChecked: 0 },
+    { name: "test", state: "pass", filesChecked: 1 },
+  ]);
+  assert.deepEqual(session.gate, { stops: 2, blocks: 1, final: "pass" });
+  assert.deepEqual(session.caught, { total: 1, byStage: { test: 1 } });
+  assert.deepEqual(session.formatOnEdit, { total: 1, ok: 1, failed: 0, skipped: 0, timeout: 0 });
+  assert.deepEqual(session.guards, { bashDenies: 1, pathDenies: 1, bashRules: { "rm-rf-dangerous": 1 } });
+
+  const text = cli();
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /^verification coverage {3}50% {2}\(1\/2 changed files checked by ≥1 stage\)$/m);
+  assert.match(text.stdout, /^stages {18}lint ✓ 1\/2 · typecheck not configured · test ✓ 1\/2$/m);
+  assert.match(text.stdout, /^gate {20}2 stops · 1 block · final: pass after 1 block$/m);
+  assert.match(text.stdout, /^caught {18}1 failure fixed before stop \(test 1\)$/m);
+  assert.match(text.stdout, /^guards {18}1 deny \(bash: rm-rf-dangerous\) · 1 path deny$/m);
+});
+
+test("e2e: with an unwritable metrics log every hook behaves exactly as before", () => {
+  const run = (broken) => {
+    const ctx = fixture();
+    // A directory where the log file goes: every append fails.
+    if (broken) mkdirSync(join(ctx.root, ".harness/state/metrics.jsonl"), { recursive: true });
+    const secret = tool("Write", { file_path: join(ctx.root, ".env"), content: "SECRET=1\n" });
+    const results = [
+      fire("SessionStart", { source: "startup" }, ctx).out.hookSpecificOutput.additionalContext,
+      fire("PreToolUse", tool("Bash", { command: "rm -rf /" }), ctx).out,
+      fire("PreToolUse", secret, ctx).out,
+    ];
+    writeFile(ctx.root, "src/a.js", "export const a = 'FAIL';\n");
+    const edit = tool("Edit", { file_path: join(ctx.root, "src/a.js"), old_string: "x", new_string: "y" });
+    results.push(fire("PostToolUse", edit, ctx).out, stop(ctx).out.decision);
+    // Each fixture has its own temp directory: mask it.
+    return JSON.parse(JSON.stringify(results).replaceAll(ctx.root, "<root>"));
+  };
+  assert.deepEqual(run(true), run(false));
 });
 
 test("e2e: the Stop gate gives up after maxAttempts, then a new turn gets a fresh budget", () => {
