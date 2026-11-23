@@ -60,16 +60,20 @@ test("SessionStart: a block is shown as context, ahead of other context", async 
   });
 });
 
-test("long reasons and context are capped at 16 KB with a marker", async () => {
+test("long reasons and context are capped under Claude Code's 10,000-character hook-string limit, with a marker", async () => {
   const big = "x".repeat(70 * 1024);
   const pre = (await run("PreToolUse", [block(big)])).output.hookSpecificOutput.permissionDecisionReason;
-  assert.equal(pre.length, 16 * 1024);
+  assert.equal(pre.length, 9500);
   assert.ok(pre.endsWith("…[truncated]"));
   const post = (await run("PostToolUse", [ctx(big)])).output.hookSpecificOutput.additionalContext;
-  assert.ok(post.length <= 16 * 1024 && post.endsWith("…[truncated]"));
+  assert.ok(post.length <= 9500 && post.endsWith("…[truncated]"));
   const session = (await run("SessionStart", [ctx(big)])).output.hookSpecificOutput.additionalContext;
-  assert.ok(session.length <= 16 * 1024 && session.endsWith("…[truncated]"));
+  assert.ok(session.length <= 9500 && session.endsWith("…[truncated]"));
   assert.equal((await run("Stop", [block("short")])).output.reason, "short", "short text is untouched");
+  const atLimit = "y".repeat(9500);
+  assert.equal((await run("Stop", [block(atLimit)])).output.reason, atLimit, "text at the limit is untouched");
+  const over = (await run("Stop", [block("y".repeat(9501))])).output.reason;
+  assert.ok(over.length === 9500 && over.endsWith("…[truncated]"), "one character over is truncated");
 });
 
 const note = (text) => () => ({ kind: "notice", text });
