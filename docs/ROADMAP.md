@@ -16,6 +16,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 0.1.1 | Post-0.1.0: doc fixes and gate notices | ✅ |
 | 0.2.0 | Monorepo and .NET support in `harness-init` | ✅ |
 | stats | `harness stats`: per-session metrics and verification coverage | ✅ |
+| cap | Fit Claude Code's 10,000-character hook-string cap | ✅ |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -109,6 +110,12 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - [x] `skills/stats/SKILL.md` (`/harness:stats`)
 - [x] Tests: `metrics`, `stats`, CLI, e2e, `runHook` fail-open
 - [x] README "Stats" section, CHANGELOG, rationale ("no single effectiveness %", next step: escape tracking)
+
+## cap: hook-string cap ✅
+
+- [x] `runHook` caps reasons and context at 9,500 characters (was 16 KB)
+- [x] Test: cap, marker and the at-limit boundary in `test/harness.test.mjs`
+- [x] CHANGELOG (Unreleased → Fixed) and rationale follow-up ticked
 
 ## Completion log
 
@@ -548,3 +555,10 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - After `gave-up` the last gate entry has every stage skipped, so coverage read `0% (no checks ran)` right after real checks. Coverage and stages now come from the last run that isn't a `gave-up` (the final outcome still is the last run's). Test: block, block, gave-up. This departs from the task's "LAST verify-gate entry"; recorded in the README and rationale.
 - Volume and rotation: kept recording allows (the task asks for them); documented the trim and the state-dir side effect as known gaps rather than dropping data `stats` doesn't yet use.
 - Nits fixed: `--since` rejects `2026-11-31` and reads an offset-less time as UTC; inherited names (`constructor`, `__proto__`) can't be policies or counter keys; a test ties each registered policy's function name to its metrics id. Not changed: the rotation race (documented).
+
+### cap: hook-string cap (2026-11-23)
+
+**Shipped:** `MAX_TEXT` in `lib/harness.mjs` is 9,500 (was 16 KB). Claude Code replaces `additionalContext` and `systemMessage` strings over 10,000 characters with a file path and a 2,000-character preview, so context between 10,000 and 16 KB reached the model only as that preview.
+**Verified:** `npm test` 468/468 passing. `test/harness.test.mjs` checks the 9,500 cap on every event with the marker, plus text exactly at the limit left untouched.
+**Changes from the sketch:** reasons (`reason`, `permissionDecisionReason`) use the same limit: the reference doesn't say whether they share the cap, and the verify-gate's longest reason (8 KB tail plus header) fits.
+**Known gaps:** the cap is by character count, not bytes; session context for a very large monorepo can still reach it and is truncated with the marker.
