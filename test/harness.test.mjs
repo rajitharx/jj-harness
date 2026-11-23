@@ -70,8 +70,10 @@ test("long reasons and context are capped under Claude Code's 10,000-character h
   const session = (await run("SessionStart", [ctx(big)])).output.hookSpecificOutput.additionalContext;
   assert.ok(session.length <= 9500 && session.endsWith("…[truncated]"));
   assert.equal((await run("Stop", [block("short")])).output.reason, "short", "short text is untouched");
-  const justUnder = "y".repeat(9500);
-  assert.equal((await run("Stop", [block(justUnder)])).output.reason, justUnder, "text at the limit is untouched");
+  const atLimit = "y".repeat(9500);
+  assert.equal((await run("Stop", [block(atLimit)])).output.reason, atLimit, "text at the limit is untouched");
+  const over = (await run("Stop", [block("y".repeat(9501))])).output.reason;
+  assert.ok(over.length === 9500 && over.endsWith("…[truncated]"), "one character over is truncated");
 });
 
 const note = (text) => () => ({ kind: "notice", text });
