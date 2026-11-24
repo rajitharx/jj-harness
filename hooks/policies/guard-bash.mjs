@@ -237,13 +237,21 @@ function stdinScripts(pipeline, i) {
   if (hs !== -1 && hs + 1 < args.length) out.push(args[hs + 1]);
   // Walk back over pass-through stages: `echo '…' | cat | bash`.
   let j = i - 1;
-  while (j > 0 && ["cat", "tee"].includes(pipeline[j].cmd) && !pipeline[j].args.some((a) => !a.startsWith("-"))) j--;
+  // `tee` copies stdin to stdout whatever files it names; `cat file` reads the file instead.
+  const passThrough = (seg) => seg.cmd === "tee" || (seg.cmd === "cat" && !seg.args.some((a) => !a.startsWith("-")));
+  while (j > 0 && passThrough(pipeline[j])) j--;
   const prev = j >= 0 ? pipeline[j] : null;
-  if (prev && (prev.cmd === "echo" || prev.cmd === "printf") && !prev.words.some((w) => /^\d*>/.test(w))) {
+  if (prev && (prev.cmd === "echo" || prev.cmd === "printf") && !prev.words.some((w) => /^(?:1|&)?>>?(?!&1)/.test(w))) {
     let words = prev.args.filter((a) => !/^-[neE]+$/.test(a));
     if (words[0] === "--") words = words.slice(1);
-    // printf: the first word is a format; with `%` in it the text is in the arguments.
-    if (prev.cmd === "printf" && words[0]?.includes("%")) words = words.slice(1);
+    // printf: the first word is a format. Check the format with its arguments filled in,
+    // and the arguments alone (`printf '%s' 'rm -rf /'`).
+    if (prev.cmd === "printf" && words[0]?.includes("%")) {
+      const [format, ...rest] = words;
+      let n = 0;
+      out.push(format.replace(/%(%|[sb])/g, (_, c) => (c === "%" ? "%" : (rest[n++] ?? ""))).replace(/(\\n)+$/, ""));
+      words = rest;
+    }
     out.push(words.join(" ").replace(/(\\n)+$/, "").replace(/^\$/, ""));
   }
   return out;
