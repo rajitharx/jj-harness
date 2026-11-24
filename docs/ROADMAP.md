@@ -585,4 +585,5 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 
 **Known gaps**
 - Only `echo`/`printf` (optionally through `cat`/`tee`) are followed into a shell. Other producers (`python -c … | sh`, `cat file | bash`, `base64 -d | sh`) and quoting forms such as `echo "$VAR"` are not inspected.
+- `echo 'rm -rf /' | bash --rcfile x` is allowed: a long option's value is read as the script file.
 - `allowPaths` entries are trusted as written; there's no warning for a broad glob like `.env*`.
