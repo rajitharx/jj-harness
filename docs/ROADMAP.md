@@ -575,7 +575,7 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 ### guards: close the cheapest guard gaps (2026-11-24)
 
 **Shipped**
-- `stdinScripts` in `guard-bash`: for a shell with no script file and no `-c`, the word after `<<<` and the text of an `echo`/`printf` directly before it in the pipeline (`-n/-e/-E` flags and a trailing literal `\n` dropped) are checked as commands, recursively like `bash -c`.
+- `stdinScripts` in `guard-bash`: for a shell with no script file and no `-c`, the word after `<<<` and the text of an `echo`/`printf` directly before it in the pipeline (`-n/-e/-E` flags, `--`, a printf format and a trailing literal `\n` dropped; a redirect on the producer means nothing is piped) are checked as commands, recursively like `bash -c`.
 - `allowPaths` (default `[]`): a path matching one of its globs is allowed before `protectedPaths` is consulted. Same glob rules (`**/` patterns also match outside the root).
 - `**/.git/**` in the default protected paths. The block reason says `allowPaths` exists and the built-in patterns can't be removed.
 
@@ -584,5 +584,5 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 **Changes from the sketch:** the sketch offered "an `allowPaths` setting or default exclusions"; the user chose `allowPaths`. It overrides every protected pattern, including the secrets defaults, if the project lists them: the README says to keep entries exact.
 
 **Known gaps**
-- Only `echo`/`printf` feed a shell this way; `cat file | bash`, `cat <<EOF | bash` through other commands and `python -c … | sh` are not inspected.
+- Only `echo`/`printf` (optionally through `cat`/`tee`) are followed into a shell. Other producers (`python -c … | sh`, `cat file | bash`, `base64 -d | sh`) and quoting forms such as `echo "$VAR"` are not inspected.
 - `allowPaths` entries are trusted as written; there's no warning for a broad glob like `.env*`.

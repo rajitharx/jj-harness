@@ -9,16 +9,12 @@ All notable changes to this project are documented here. The format is based on 
 - **`harness stats`** reports what the harness did in a session: **verification coverage** (the share of changed files that at least one lint, typecheck or test stage ran on, a lower bound), the stage results, gate stops, blocks and final outcome, the failures it caught (blocks followed by a pass, by stage), formatter results and guard denies. `stats [--session <id> | --last | --since <7d|24h|date>] [--json]` exits 0 (also for `stats: no data`) or 2; `/harness:stats` runs it and quotes it. There is deliberately no single effectiveness percentage, and problems found after the gate passed (CI, review, reverts) aren't measured.
 - **Metrics log.** Hooks record counts and outcomes to `.harness/state/metrics.jsonl` (local, self-ignoring, trimmed to its newest half at 1 MiB). It never holds command text, output, file contents, environment values or paths. A failure to record can't change a hook's output.
 - `guard-bash` rules have stable ids (`force-push-main`, …), used by the log.
-
-### Added
-
 - **`allowPaths`** exempts exact paths from `protectedPaths`, e.g. `"allowPaths": [".env.example"]`, so a template env file can be edited while `.env` stays protected. The built-in patterns still can't be removed.
 
 ### Fixed
 
-- **A script piped or here-stringed into a shell is now checked.** `echo 'rm -rf /' | bash`, `printf … | sudo bash` and `bash <<< 'rm -rf /'` were allowed; the text is now parsed as a command of its own. A shell given a script file or `-c` doesn't read stdin, so those stay allowed.
+- **A script piped or here-stringed into a shell is now checked.** `echo 'rm -rf /' | bash`, `printf … | sudo bash` and `bash <<< 'rm -rf /'` were allowed; the text is now parsed as a command of its own. The text is also followed through `cat`/`tee` stages, and `bash -s`, `-o pipefail` and the like are understood. A shell given a script file, `-c` or `-n` doesn't read stdin, so those stay allowed.
 - **Nested `.git` directories are protected.** `**/.git/**` joins the defaults, so submodules and vendored repos' `.git` internals can't be edited.
-
 - **Hook text over 10,000 characters reached the model only as a preview.** Claude Code replaces longer `additionalContext` and `systemMessage` strings with a file path and a 2,000-character preview. `runHook` capped at 16 KB, so context between 10,000 characters and 16 KB was silently cut that way. Reasons and context are now capped at 9,500 characters, with the `…[truncated]` marker.
 
 ## [0.2.0] - 2026-11-21

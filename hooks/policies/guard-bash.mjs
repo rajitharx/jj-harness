@@ -224,22 +224,53 @@ function nestedCommands({ cmd, args, subs, heredocs }) {
 
 /**
  * Scripts that reach a shell on stdin without a heredoc: the text of an `echo`/`printf`
- * earlier in the pipeline (`echo 'rm -rf /' | bash`), or a here-string (`bash <<< 'rm -rf /'`).
- * Only a shell that reads stdin counts: no script file and no `-c`.
+ * earlier in the pipeline (`echo 'rm -rf /' | bash`, also through `cat`/`tee`), or a
+ * here-string (`bash <<< 'rm -rf /'`). Only a shell that reads stdin counts.
  */
 function stdinScripts(pipeline, i) {
   const { cmd, args } = pipeline[i];
   if (!SHELLS.has(cmd)) return [];
-  const out = [];
   const hs = args.indexOf("<<<");
   const own = hs === -1 ? args : args.slice(0, hs);
-  const readsStdin = own.every((a) => a.startsWith("-") && !/^-[a-zA-Z]*c/.test(a));
-  if (readsStdin && hs !== -1 && hs + 1 < args.length) out.push(args[hs + 1]);
-  if (readsStdin && i > 0) {
-    const prev = pipeline[i - 1];
-    if (prev.cmd === "echo" || prev.cmd === "printf") out.push(prev.args.filter((a) => !/^-[neE]+$/.test(a)).join(" ").replace(/(\\n)+$/, ""));
+  if (!shellReadsStdin(own)) return [];
+  const out = [];
+  if (hs !== -1 && hs + 1 < args.length) out.push(args[hs + 1]);
+  // Walk back over pass-through stages: `echo '…' | cat | bash`.
+  let j = i - 1;
+  while (j > 0 && ["cat", "tee"].includes(pipeline[j].cmd) && !pipeline[j].args.some((a) => !a.startsWith("-"))) j--;
+  const prev = j >= 0 ? pipeline[j] : null;
+  if (prev && (prev.cmd === "echo" || prev.cmd === "printf") && !prev.words.some((w) => /^\d*>/.test(w))) {
+    let words = prev.args.filter((a) => !/^-[neE]+$/.test(a));
+    if (words[0] === "--") words = words.slice(1);
+    // printf: the first word is a format; with `%` in it the text is in the arguments.
+    if (prev.cmd === "printf" && words[0]?.includes("%")) words = words.slice(1);
+    out.push(words.join(" ").replace(/(\\n)+$/, "").replace(/^\$/, ""));
   }
   return out;
+}
+
+/**
+ * Whether a shell's own arguments (before any `<<<`) leave it reading its script from stdin:
+ * no `-c`, no `-n`, and either `-s` or no script file. Options that take a value
+ * (`-o pipefail`, `-O extglob`, `+o`, `+O`) don't count as the script file.
+ */
+function shellReadsStdin(own) {
+  let explicitStdin = false;
+  let sawFile = false;
+  for (let k = 0; k < own.length; k++) {
+    const a = own[k];
+    if (a === "--") { sawFile = sawFile || k + 1 < own.length; break; }
+    if (/^[-+][a-zA-Z]+$/.test(a)) {
+      if (a[0] === "-" && /[cn]/.test(a)) return false;
+      if (a[0] === "-" && a.includes("s")) explicitStdin = true;
+      if (/[oO]/.test(a)) k++; // takes a value
+      continue;
+    }
+    if (a.startsWith("--")) continue; // --login, --norc, …
+    sawFile = true;
+    break;
+  }
+  return explicitStdin || !sawFile;
 }
 
 /** The script string of `sh -c '…'` (any flag cluster containing `c`, e.g. `-lc`), or null. */
