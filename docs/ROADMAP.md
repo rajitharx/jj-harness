@@ -18,6 +18,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | stats | `harness stats`: per-session metrics and verification coverage | ✅ |
 | cap | Fit Claude Code's 10,000-character hook-string cap | ✅ |
 | guards | Close the cheapest guard gaps (`allowPaths`, stdin scripts, nested `.git`) | ✅ |
+| 0.3.0 | Release `stats`, `cap` and `guards`; fix stale README monorepo limitation | ✅ |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -587,3 +588,13 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - Only `echo`/`printf` (optionally through `cat`/`tee`) are followed into a shell. Other producers (`python -c … | sh`, `cat file | bash`, `base64 -d | sh`) and quoting forms such as `echo "$VAR"` are not inspected.
 - `echo 'rm -rf /' | bash --rcfile x` is allowed: a long option's value is read as the script file.
 - `allowPaths` entries are trusted as written; there's no warning for a broad glob like `.env*`.
+
+### 0.3.0: Release and doc fix (2026-11-24)
+
+**Shipped**
+- Version 0.3.0 in `plugin.json` and `package.json` (minor: `stats` and `allowPaths` add features). The changelog's Unreleased section became `[0.3.0]`; the README's version line and tag example follow.
+- The README known-limitations line "`harness-init` reads the project root only" now states the real 0.2.0 limits (packages one or two levels down, no workspace globs, first stack per directory). It contradicted the README's own `harness-init` section.
+
+**Verified:** `npm test` (see PR). `test/release.test.mjs` checks the version fields and the changelog entry.
+**Changes from the sketch:** none. The OnLah dogfood of 0.2.0 found the stale line: `init` detected .NET and three packages, and `dotnet format --verify-no-changes --include <file>` from `apps/backend` exited 0 in about 5.4s.
+**Known gaps:** the 0.1.0 completion log still lists "Detection reads the root directory only"; it is history and was left. The dogfood isn't finished (agents and remaining skills not yet invoked).
