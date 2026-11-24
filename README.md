@@ -9,7 +9,7 @@ A reusable agent harness for Claude Code, shipped as a plugin. Install it once a
 - **Stats**: records what the harness did in each session and reports how much of a change its checks covered and what they caught (`harness stats`).
 - **Agents**: `reviewer` (read-only, verified findings only) and `test-writer` (tests in the project's style, related tests only).
 
-Version 0.1.1. See [`CHANGELOG.md`](CHANGELOG.md), the per-step log in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the design in [`docs/design/rationale.md`](docs/design/rationale.md). Needs Node ≥22 on `PATH`; there are no dependencies to install.
+Version 0.3.0. See [`CHANGELOG.md`](CHANGELOG.md), the per-step log in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the design in [`docs/design/rationale.md`](docs/design/rationale.md). Needs Node ≥22 on `PATH`; there are no dependencies to install.
 
 ## Quickstart
 
@@ -223,7 +223,7 @@ The full lists are the "Known gaps" of each step in [`docs/ROADMAP.md`](docs/ROA
 - The guards are pattern matching, not a sandbox. Variables, aliases, encoded commands, scripts written to a file and then run, and `echo '…' | bash` get past `guard-bash`.
 - "Changed files" means everything uncommitted, including work from before the session, so the gate can block on someone else's in-progress change. Work committed mid-turn isn't checked by the gate.
 - Related-test quality depends on the tool (see above). Rust has no related-test mode, so `harness-init` proposes no test command for it.
-- `harness-init` reads the project root only. In a monorepo it proposes one stack's commands.
+- `harness-init` finds monorepo packages only in the root's subdirectories and in children of `apps/`, `packages/` and `services/`, not from workspace globs such as `pnpm-workspace.yaml`. Within one directory only the first stack with commands is proposed.
 - `.env.example` is protected by the defaults, and a project can't unprotect it.
 - Agent and skill behaviour can only be checked by use; the tests cover their structure. The reviewer's read-only rule is enforced by its tool list plus instructions (Bash can still write).
 - Quoting is POSIX-shell. Windows is untested.
@@ -251,5 +251,5 @@ claude plugin validate . # official manifest, skill, agent and hook checks
    gh release create harness--v<version> --verify-tag --title "harness v<version>" --notes-file <changelog excerpt>
    ```
 
-   `claude plugin tag` takes the version from `plugin.json`. It compares it with the marketplace entry's version only when the entry sets one, and ours deliberately doesn't, so `test/release.test.mjs` is what keeps `plugin.json` and `package.json` in step. It refuses a dirty working tree or a tag that already exists (unless `--force`), then creates the `{name}--v{version}` tag (`harness--v0.1.1`).
+   `claude plugin tag` takes the version from `plugin.json`. It compares it with the marketplace entry's version only when the entry sets one, and ours deliberately doesn't, so `test/release.test.mjs` is what keeps `plugin.json` and `package.json` in step. It refuses a dirty working tree or a tag that already exists (unless `--force`), then creates the `{name}--v{version}` tag (`harness--v0.3.0`).
 5. Users with auto-update on get it in the background. Others run `/plugin marketplace update jj-harness`, or `claude plugin marketplace update jj-harness` and then `claude plugin update harness@jj-harness` (see [Quickstart](#quickstart)).
