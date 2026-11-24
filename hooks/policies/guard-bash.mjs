@@ -196,12 +196,12 @@ function check(command, depth, ctx) {
     for (const rule of RULES) {
       if (rule.scope === "pipeline" && rule.test(pipeline, ctx)) return { id: rule.id, reason: rule.reason, text: show(pipeline) };
     }
-    for (const segment of pipeline) {
+    for (const [i, segment] of pipeline.entries()) {
       for (const rule of RULES) {
         if (rule.scope === "segment" && rule.test(segment, ctx)) return { id: rule.id, reason: rule.reason, text: show([segment]) };
       }
       if (depth >= 3) continue;
-      for (const nested of nestedCommands(segment)) {
+      for (const nested of [...nestedCommands(segment), ...stdinScripts(pipeline, i)]) {
         const hit = check(nested, depth + 1, ctx);
         if (hit) return hit;
       }
@@ -218,6 +218,26 @@ function nestedCommands({ cmd, args, subs, heredocs }) {
     const script = shellScriptArg(args);
     if (script !== null) out.push(script);
     out.push(...heredocs);
+  }
+  return out;
+}
+
+/**
+ * Scripts that reach a shell on stdin without a heredoc: the text of an `echo`/`printf`
+ * earlier in the pipeline (`echo 'rm -rf /' | bash`), or a here-string (`bash <<< 'rm -rf /'`).
+ * Only a shell that reads stdin counts: no script file and no `-c`.
+ */
+function stdinScripts(pipeline, i) {
+  const { cmd, args } = pipeline[i];
+  if (!SHELLS.has(cmd)) return [];
+  const out = [];
+  const hs = args.indexOf("<<<");
+  const own = hs === -1 ? args : args.slice(0, hs);
+  const readsStdin = own.every((a) => a.startsWith("-") && !/^-[a-zA-Z]*c/.test(a));
+  if (readsStdin && hs !== -1 && hs + 1 < args.length) out.push(args[hs + 1]);
+  if (readsStdin && i > 0) {
+    const prev = pipeline[i - 1];
+    if (prev.cmd === "echo" || prev.cmd === "printf") out.push(prev.args.filter((a) => !/^-[neE]+$/.test(a)).join(" ").replace(/(\\n)+$/, ""));
   }
   return out;
 }

@@ -97,6 +97,8 @@ for (const [name, config] of [
   ["verify files with a non-string", { verify: { lint: { run: "x {files}", files: [1] } } }],
   ["verify files with an empty glob", { verify: { lint: { run: "x {files}", files: [""] } } }],
   ["protectedPaths not strings", { protectedPaths: [1] }],
+  ["allowPaths not strings", { allowPaths: [".env.example", 1] }],
+  ["allowPaths not an array", { allowPaths: ".env.example" }],
   ["bad regex", { blockedCommands: ["("] }],
   ["bad maxAttempts", { stopGate: { maxAttempts: 0 } }],
   ["bad enabled", { stopGate: { enabled: "yes" } }],
