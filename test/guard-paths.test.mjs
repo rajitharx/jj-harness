@@ -48,7 +48,7 @@ for (const [path, pattern] of MUST_BLOCK) {
     assert.equal(v.kind, "block");
     assert.ok(v.reason.includes(`"${pattern}"`), `reason names the pattern: ${v.reason}`);
     // Dogfood finding: without this, the agent told the user to drop .env from protectedPaths, which can't work.
-    assert.match(v.reason, /can add protected paths but can't remove the built-in ones/);
+    assert.match(v.reason, /can't remove the built-in patterns/);
   });
 }
 
@@ -121,4 +121,19 @@ test("metrics: a deny names the rule, an allow says allow, and non-edit calls re
   assert.equal((await guardPaths({ tool_name: "Bash", tool_input: { command: "ls" } }, config)).metrics, undefined);
   assert.equal((await guardPaths({ tool_name: "Edit", tool_input: {} }, config)).metrics, undefined);
   assert.ok(!JSON.stringify((await editRaw("secrets/.env")).metrics).includes("secrets"), "no path in the metrics");
+});
+
+test("allowPaths exempts exact paths from protectedPaths, and nothing else", async () => {
+  const c = loadConfig(makeProject({ allowPaths: [".env.example", "**/.env.sample"] }));
+  const edit = (p) => guardPaths({ tool_name: "Edit", cwd: c.root, tool_input: { file_path: p } }, c);
+  for (const ok of [".env.example", "apps/web/.env.sample", ".env.sample"]) assert.equal((await edit(ok)).kind, "allow", ok);
+  for (const no of [".env", ".env.local", "apps/web/.env", ".git/config", "server.pem"]) assert.equal((await edit(no)).kind, "block", no);
+  assert.equal((await guardPaths({ tool_name: "Edit", cwd: c.root, tool_input: { file_path: ".env.example" } }, loadConfig(makeProject()))).kind, "block");
+});
+
+test("nested .git directories are protected by default", async () => {
+  const c = loadConfig(makeProject());
+  for (const p of ["vendor/lib/.git/config", "sub/.git/hooks/pre-commit"]) {
+    assert.equal((await guardPaths({ tool_name: "Write", cwd: c.root, tool_input: { file_path: p } }, c)).kind, "block", p);
+  }
 });

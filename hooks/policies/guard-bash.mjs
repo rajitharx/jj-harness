@@ -196,12 +196,12 @@ function check(command, depth, ctx) {
     for (const rule of RULES) {
       if (rule.scope === "pipeline" && rule.test(pipeline, ctx)) return { id: rule.id, reason: rule.reason, text: show(pipeline) };
     }
-    for (const segment of pipeline) {
+    for (const [i, segment] of pipeline.entries()) {
       for (const rule of RULES) {
         if (rule.scope === "segment" && rule.test(segment, ctx)) return { id: rule.id, reason: rule.reason, text: show([segment]) };
       }
       if (depth >= 3) continue;
-      for (const nested of nestedCommands(segment)) {
+      for (const nested of [...nestedCommands(segment), ...stdinScripts(pipeline, i)]) {
         const hit = check(nested, depth + 1, ctx);
         if (hit) return hit;
       }
@@ -220,6 +220,65 @@ function nestedCommands({ cmd, args, subs, heredocs }) {
     out.push(...heredocs);
   }
   return out;
+}
+
+/**
+ * Scripts that reach a shell on stdin without a heredoc: the text of an `echo`/`printf`
+ * earlier in the pipeline (`echo 'rm -rf /' | bash`, also through `cat`/`tee`), or a
+ * here-string (`bash <<< 'rm -rf /'`). Only a shell that reads stdin counts.
+ */
+function stdinScripts(pipeline, i) {
+  const { cmd, args } = pipeline[i];
+  if (!SHELLS.has(cmd)) return [];
+  const hs = args.indexOf("<<<");
+  const own = hs === -1 ? args : args.slice(0, hs);
+  if (!shellReadsStdin(own)) return [];
+  const out = [];
+  if (hs !== -1 && hs + 1 < args.length) out.push(args[hs + 1]);
+  // Walk back over pass-through stages: `echo '…' | cat | bash`.
+  let j = i - 1;
+  // `tee` copies stdin to stdout whatever files it names; `cat file` reads the file instead.
+  const passThrough = (seg) => seg.cmd === "tee" || (seg.cmd === "cat" && !seg.args.some((a) => !a.startsWith("-")));
+  while (j > 0 && passThrough(pipeline[j])) j--;
+  const prev = j >= 0 ? pipeline[j] : null;
+  if (prev && (prev.cmd === "echo" || prev.cmd === "printf") && !prev.words.some((w) => /^(?:1|&)?>>?(?!&1)/.test(w))) {
+    let words = prev.args.filter((a) => !/^-[neE]+$/.test(a));
+    if (words[0] === "--") words = words.slice(1);
+    // printf: the first word is a format. Check the format with its arguments filled in,
+    // and the arguments alone (`printf '%s' 'rm -rf /'`).
+    if (prev.cmd === "printf" && words[0]?.includes("%")) {
+      const [format, ...rest] = words;
+      let n = 0;
+      out.push(format.replace(/%(%|[sb])/g, (_, c) => (c === "%" ? "%" : (rest[n++] ?? ""))).replace(/(\\n)+$/, ""));
+      words = rest;
+    }
+    out.push(words.join(" ").replace(/(\\n)+$/, "").replace(/^\$/, ""));
+  }
+  return out;
+}
+
+/**
+ * Whether a shell's own arguments (before any `<<<`) leave it reading its script from stdin:
+ * no `-c`, no `-n`, and either `-s` or no script file. Options that take a value
+ * (`-o pipefail`, `-O extglob`, `+o`, `+O`) don't count as the script file.
+ */
+function shellReadsStdin(own) {
+  let explicitStdin = false;
+  let sawFile = false;
+  for (let k = 0; k < own.length; k++) {
+    const a = own[k];
+    if (a === "--") { sawFile = sawFile || k + 1 < own.length; break; }
+    if (/^[-+][a-zA-Z]+$/.test(a)) {
+      if (a[0] === "-" && /[cn]/.test(a)) return false;
+      if (a[0] === "-" && a.includes("s")) explicitStdin = true;
+      if (/[oO]/.test(a)) k++; // takes a value
+      continue;
+    }
+    if (a.startsWith("--")) continue; // --login, --norc, …
+    sawFile = true;
+    break;
+  }
+  return explicitStdin || !sawFile;
 }
 
 /** The script string of `sh -c '…'` (any flag cluster containing `c`, e.g. `-lc`), or null. */

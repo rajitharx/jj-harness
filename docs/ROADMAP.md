@@ -17,6 +17,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 0.2.0 | Monorepo and .NET support in `harness-init` | ✅ |
 | stats | `harness stats`: per-session metrics and verification coverage | ✅ |
 | cap | Fit Claude Code's 10,000-character hook-string cap | ✅ |
+| guards | Close the cheapest guard gaps (`allowPaths`, stdin scripts, nested `.git`) | ✅ |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -116,6 +117,13 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - [x] `runHook` caps reasons and context at 9,500 characters (was 16 KB)
 - [x] Test: cap, marker and the at-limit boundary in `test/harness.test.mjs`
 - [x] CHANGELOG (Unreleased → Fixed) and rationale follow-up ticked
+
+## guards: close the cheapest guard gaps ✅
+
+- [x] `guard-bash` checks the text piped (`echo`/`printf`) or here-stringed into a shell that reads stdin
+- [x] `allowPaths` config key (validated in `lib/config.mjs`) exempts exact paths from `protectedPaths`; `guard-paths` honours it
+- [x] `**/.git/**` added to the default protected paths
+- [x] Tests, README config table and defaults block, `ship` skill's protected list, CHANGELOG, rationale
 
 ## Completion log
 
@@ -562,3 +570,20 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 **Verified:** `npm test` 468/468 passing. `test/harness.test.mjs` checks the 9,500 cap on every event with the marker, plus text exactly at the limit left untouched.
 **Changes from the sketch:** reasons (`reason`, `permissionDecisionReason`) use the same limit: the reference doesn't say whether they share the cap, and the verify-gate's longest reason (8 KB tail plus header) fits.
 **Known gaps:** the cap is by character count, not bytes; session context for a very large monorepo can still reach it and is truncated with the marker. A gate block whose command lists many `{files}` can push the reason over the cap, and truncation then drops the closing "fix it, the gate will re-run" line; lowering the 8 KB output tail would avoid that.
+
+
+### guards: close the cheapest guard gaps (2026-11-24)
+
+**Shipped**
+- `stdinScripts` in `guard-bash`: for a shell with no script file and no `-c`, the word after `<<<` and the text of an `echo`/`printf` directly before it in the pipeline (`-n/-e/-E` flags, `--`, a printf format and a trailing literal `\n` dropped; a redirect on the producer means nothing is piped) are checked as commands, recursively like `bash -c`.
+- `allowPaths` (default `[]`): a path matching one of its globs is allowed before `protectedPaths` is consulted. Same glob rules (`**/` patterns also match outside the root).
+- `**/.git/**` in the default protected paths. The block reason says `allowPaths` exists and the built-in patterns can't be removed.
+
+**Verified:** `npm test` passes (see PR). New cases: 7 must-block and 5 must-allow commands in `test/guard-bash.test.mjs` (including `bash -c "…" <<< "rm -rf /"`, which stays allowed because `-c` ignores stdin); `allowPaths` and nested `.git` tests in `test/guard-paths.test.mjs`; two invalid-config cases; the README defaults block and the `ship` skill's list stay in sync by their existing tests.
+
+**Changes from the sketch:** the sketch offered "an `allowPaths` setting or default exclusions"; the user chose `allowPaths`. It overrides every protected pattern, including the secrets defaults, if the project lists them: the README says to keep entries exact.
+
+**Known gaps**
+- Only `echo`/`printf` (optionally through `cat`/`tee`) are followed into a shell. Other producers (`python -c … | sh`, `cat file | bash`, `base64 -d | sh`) and quoting forms such as `echo "$VAR"` are not inspected.
+- `echo 'rm -rf /' | bash --rcfile x` is allowed: a long option's value is read as the script file.
+- `allowPaths` entries are trusted as written; there's no warning for a broad glob like `.env*`.

@@ -58,6 +58,7 @@ Commit those four files. Without a config the guards still run with their defaul
 | `verify.typecheck` | command or array | none | Stop gate stage 2. |
 | `verify.test` | command or array | none | Stop gate stage 3. |
 | `protectedPaths` | globs | see below | Paths the agent may not Edit, Write, MultiEdit or NotebookEdit. Your entries **add to** the defaults; they can't remove them. |
+| `allowPaths` | globs | `[]` | Paths exempt from `protectedPaths`, e.g. `[".env.example"]`. A matching path may be edited even though a protected pattern also matches it, so keep these exact (an `.env*` entry would unprotect your real `.env`). |
 | `blockedCommands` | regexes | `[]` | Extra Bash commands to deny, on top of the built-in rules. |
 | `stopGate.enabled` | boolean | `true` | Turn the Stop gate off. |
 | `stopGate.maxAttempts` | integer ≥1 | `3` | Blocks in a row before the gate gives up for the turn. |
@@ -70,7 +71,8 @@ A command is a string, or `{ "run": "<command>", "files": ["<glob>", …], "cwd"
 ```json
 {
   "verify": {},
-  "protectedPaths": [".env", ".env.*", "**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", ".git/**"],
+  "protectedPaths": [".env", ".env.*", "**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", ".git/**", "**/.git/**"],
+  "allowPaths": [],
   "blockedCommands": [],
   "stopGate": { "enabled": true, "maxAttempts": 3, "timeoutSec": 300 },
   "formatTimeoutSec": 30
