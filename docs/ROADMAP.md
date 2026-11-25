@@ -598,3 +598,5 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 **Verified:** `npm test` (see PR). `test/release.test.mjs` checks the version fields and the changelog entry.
 **Changes from the sketch:** none. The OnLah dogfood of 0.2.0 found the stale line: `init` detected .NET and three packages, and `dotnet format --verify-no-changes --include <file>` from `apps/backend` exited 0 in about 5.4s.
 **Known gaps:** the 0.1.0 completion log still lists "Detection reads the root directory only"; it is history and was left. The dogfood isn't finished (agents and remaining skills not yet invoked).
+
+**Follow-up (2026-11-25):** the `harness--v0.3.0` tag and GitHub release were created from `main`. The changelog link footer gained `[0.3.0]` and `[0.2.0]` and `[Unreleased]` compares from v0.3.0. `.gitignore` now ignores `.claude/worktrees/` and `.claude/settings.local.json`, so the untracked `.claude/` no longer makes `claude plugin tag` refuse a clean tree.
