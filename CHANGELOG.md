@@ -68,6 +68,8 @@ First release. Steps 0 to 6 of the roadmap.
 - The marketplace manifest has a description, and `plugin.json` declares that the plugin reaches no network hosts, which clears the `claude plugin validate` warnings for both manifests. The version lives only in `plugin.json` (and `package.json`), not in the marketplace entry.
 - The README's private-repo install notes: they now cover git credentials (an SSH agent key, or `gh auth setup-git`), `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`, auto-update being off by default, and the manual update commands.
 
-[Unreleased]: https://github.com/rajitharx/jj-harness/compare/harness--v0.1.1...HEAD
+[Unreleased]: https://github.com/rajitharx/jj-harness/compare/harness--v0.3.0...HEAD
+[0.3.0]: https://github.com/rajitharx/jj-harness/compare/harness--v0.2.0...harness--v0.3.0
+[0.2.0]: https://github.com/rajitharx/jj-harness/compare/harness--v0.1.1...harness--v0.2.0
 [0.1.1]: https://github.com/rajitharx/jj-harness/compare/harness--v0.1.0...harness--v0.1.1
 [0.1.0]: https://github.com/rajitharx/jj-harness/releases/tag/harness--v0.1.0
