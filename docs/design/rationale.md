@@ -93,4 +93,4 @@ After `stats`: see the ROADMAP known gaps. Top follow-ups:
 5. ~~**Fit Claude Code's 10,000-character hook-string cap.**~~ Done: `runHook` caps reasons and context at 9,500 characters. The reference doesn't say whether `reason` shares the cap, so it uses the same limit. A monorepo's session context is still the likeliest to approach it.
 6. **Monorepo gaps**: packages are found one or two levels down only, and not from workspace globs (`pnpm-workspace.yaml`, `workspaces`, Cargo or Go workspaces); the root's tool dependencies aren't inherited by packages (only lockfiles and tool configs are); and there is no per-package `tsc -b` for solution-style `tsconfig.json`.
 7. **Second test runners** (from the OnLah dogfood): a package with `jest` limited to some tests and `node --test` for the rest gets only the jest command, which passes with nothing selected. Detection should read the `test` script and say so. (.NET tests that need Docker are now flagged in `notes`.)
-7. **Plugin icon** (`ICON_MISSING`) if the plugin is ever submitted to the public directory.
+8. **Plugin icon** (`ICON_MISSING`) if the plugin is ever submitted to the public directory.

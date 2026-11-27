@@ -609,7 +609,7 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 
 ### docker-tests: .NET tests that need Docker (2026-11-27)
 
-**Shipped:** `detectDotnet` reads the projects listed in `.sln`/`.slnx` files (and those beside them) and adds a note when a test project references Testcontainers.
+**Shipped:** `detectDotnet` reads the projects listed in the `.sln`/`.slnx` the command runs (or the lone project) and adds a note when a test project references Testcontainers.
 
 **Verified:** `npm test` (see PR), new cases in `test/monorepo.test.mjs`. Found by dogfooding on OnLah: bare `dotnet test` failed 121 of 183 tests with Docker stopped, while the unit project passed 171 of 171 in about 2s.
 
@@ -619,4 +619,10 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - Only direct `PackageReference`s are seen; Testcontainers pulled in through a shared test library, `Directory.Build.props`, or another service dependency (a local database, Aspire) isn't noticed.
 - From the same dogfood, not fixed: when `jest` is configured with a narrow `testMatch`, `jest --findRelatedTests --passWithNoTests` passes while the package's other runner (`node --test`) never runs. Detection doesn't read the `test` script for a second runner.
 - Also from it: a test command filtered to source extensions misses other files tests read (Markdown, HTML, CSS).
+- A project path with characters outside letters, digits and `_ .,'()+@/-` is ignored, so it is never put into a suggested command.
 
+**Review round 1** (PR #14, four blocking)
+- Regexes backtracked quadratically on malformed input: `.sln` is now matched line by line, tags can't span `<`, and comments are stripped without a regex. Timed tests cover each.
+- Suggested paths are filtered and quoted; missing files, and files that resolve outside the directory, are skipped.
+- The rationale's duplicate item number is fixed.
+- Non-blocking, also fixed: only the target solution is read; stricter test-project detection; the narrower command names the build target when needed.

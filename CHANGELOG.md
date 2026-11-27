@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
-- **`harness-init` warns about .NET tests that need Docker.** When a test project listed in the solution (or lying beside it) references a Testcontainers package, a note names it, says the gate would block while Docker is down, and offers the test projects without that reference. The proposed command is unchanged.
+- **`harness-init` warns about .NET tests that need Docker.** When a test project that `dotnet test` would run (listed in the solution, or the lone project) references a Testcontainers package, a note names it, says the gate would block while Docker is down, and offers the test projects without that reference. The proposed command is unchanged.
 
 ## [0.3.0] - 2026-11-24
 
