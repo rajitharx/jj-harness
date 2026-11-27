@@ -4,10 +4,18 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-28
+
 ### Added
 
 - **`harness-init` warns about a second JavaScript test runner.** When a `test` or `test:*` script starts a runner other than the one in the proposed command (say `node --test` beside `jest`), a note names it and suggests running the script, since the proposed command can pass without running those tests. The proposal is unchanged.
 - **`harness-init` warns about .NET tests that need Docker.** When a test project that `dotnet test` would run (listed in the solution, or the lone project) references a Testcontainers package, a note names it, says the gate would block while Docker is down, and offers the test projects without that reference. The proposed command is unchanged.
+
+### Fixed
+
+- **`harness-init` could stall on an unusual test script.** Looking for `node --test` took quadratic time.
+- **The second-runner note** no longer suggests a script that watches for changes, and `--test` passed to your own script isn't read as `node --test`.
+- **.NET commands only name plain file names.** A solution name with spaces is quoted, one with shell syntax is passed over, and a solution that links outside its directory isn't read.
 
 ## [0.3.0] - 2026-11-24
 
@@ -73,7 +81,8 @@ First release. Steps 0 to 6 of the roadmap.
 - The marketplace manifest has a description, and `plugin.json` declares that the plugin reaches no network hosts, which clears the `claude plugin validate` warnings for both manifests. The version lives only in `plugin.json` (and `package.json`), not in the marketplace entry.
 - The README's private-repo install notes: they now cover git credentials (an SSH agent key, or `gh auth setup-git`), `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`, auto-update being off by default, and the manual update commands.
 
-[Unreleased]: https://github.com/rajitharx/jj-harness/compare/harness--v0.3.0...HEAD
+[Unreleased]: https://github.com/rajitharx/jj-harness/compare/harness--v0.3.1...HEAD
+[0.3.1]: https://github.com/rajitharx/jj-harness/compare/harness--v0.3.0...harness--v0.3.1
 [0.3.0]: https://github.com/rajitharx/jj-harness/compare/harness--v0.2.0...harness--v0.3.0
 [0.2.0]: https://github.com/rajitharx/jj-harness/compare/harness--v0.1.1...harness--v0.2.0
 [0.1.1]: https://github.com/rajitharx/jj-harness/compare/harness--v0.1.0...harness--v0.1.1

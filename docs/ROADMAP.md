@@ -22,6 +22,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | docker-tests | `harness-init` warns about .NET tests that need Docker | ✅ |
 | dogfood-monorepo | Dogfood the gate, agents and skills on a real monorepo | 🟡 |
 | second-runner | `harness-init` warns about a second JavaScript test runner | ✅ |
+| 0.3.1 | Release the two `init` warnings, with review follow-ups | ✅ |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -147,6 +148,12 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 
 - [x] `harness-init` notes a `test` script that starts a runner other than the proposed one
 - [x] Table-driven fixtures, including no-note cases and a timed case
+
+## 0.3.1: release the `init` warnings ✅
+
+- [x] Linear `node --test` detection; no watching script suggested; a script's own `--test` ignored
+- [x] .NET: quoted or skipped file names, no absolute entries, the solution read only inside its directory
+- [x] Version, changelog and README
 
 ## Completion log
 
@@ -681,3 +688,16 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - Runners behind wrappers (`run-s`, `turbo`, a shell script, a script not named `test`) aren't seen.
 - A single runner whose config matches only some test files isn't noticed.
 - The script is read as text, not parsed as shell, so a quoted `;` or `&&` can split a command wrongly.
+
+### 0.3.1: release the `init` warnings (2026-11-28)
+
+**Shipped:** version 0.3.1 with the `docker-tests` and `second-runner` notes, and fixes for non-blocking findings from their reviews (PRs #14 and #16).
+
+**Verified:** `npm test` and `claude plugin validate .` (see PR), with new cases in `test/detect.test.mjs` and `test/monorepo.test.mjs`.
+
+**Changes from the sketch:** none. When several .NET files are present and no name is safe to put in a command, no test command is proposed.
+
+**Known gaps**
+- Second runners behind these aren't seen: quoted environment values with spaces, flags of `c8` or `nyc`, `(mocha)`, `env`, `dotenv`, `pnpm dlx`, `yarn dlx`, `bun x`, `node` running a runner that isn't under `bin/`.
+- A watch mode set in a runner's config file, or through a short flag, isn't noticed.
+- A suggested command can rerun the proposed runner when one script starts both.
