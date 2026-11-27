@@ -8,14 +8,13 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
-- **`harness-init` warns about a second JavaScript test runner.** When a `test` or `test:*` script starts a runner other than the one in the proposed command (say `node --test` beside `jest`), a note names it and suggests running the script, since the proposed command can pass without running those tests. The proposal is unchanged.
+- **`harness-init` warns about a second JavaScript test runner.** When a `test` or `test:*` script starts a runner other than the one in the proposed command (say `node --test` beside `jest`), a note names it and suggests running the script, since the proposed command can pass without running those tests. Watching scripts are never suggested. The proposal is unchanged.
 - **`harness-init` warns about .NET tests that need Docker.** When a test project that `dotnet test` would run (listed in the solution, or the lone project) references a Testcontainers package, a note names it, says the gate would block while Docker is down, and offers the test projects without that reference. The proposed command is unchanged.
 
 ### Fixed
 
 - **`harness-init` could stall on an unusual test script.** Looking for `node --test` took quadratic time.
-- **The second-runner note** no longer suggests a script that watches for changes, and `--test` passed to your own script isn't read as `node --test`.
-- **.NET commands only name plain file names.** A solution name with spaces is quoted, one with shell syntax is passed over, and a solution that links outside its directory isn't read.
+- **.NET commands only name plain file names.** A solution name with spaces is quoted, one with shell syntax is passed over (a note says so), and a solution that links outside its directory isn't read.
 
 ## [0.3.0] - 2026-11-24
 

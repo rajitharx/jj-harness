@@ -242,7 +242,7 @@ claude plugin validate . # official manifest, skill, agent and hook checks
 
 1. Bump `version` in `.claude-plugin/plugin.json` and `package.json` together. The marketplace entry deliberately has no `version` (Claude Code would silently prefer `plugin.json`'s). `test/release.test.mjs` fails if the two differ, if the marketplace entry sets one, or if `CHANGELOG.md` has no entry for the version. Users get only commits that bump the version.
 2. Add the `CHANGELOG.md` entry and tick the step in `docs/ROADMAP.md`.
-3. `npm test` and `claude plugin validate .` pass. CI runs both, on Node 22 and 24, on Ubuntu and macOS. The one expected warning is that the root `CLAUDE.md` isn't loaded as plugin context; it's this repo's development guide, not plugin content.
+3. `npm test` and `claude plugin validate .` pass. CI runs both, on Node 22 and 24, on Ubuntu and macOS. Two warnings are expected: the root `CLAUDE.md` isn't loaded as plugin context (it's this repo's development guide, not plugin content), and there is no plugin icon.
 4. Merge the release PR to `main`, then from an up-to-date `main`:
 
    ```sh

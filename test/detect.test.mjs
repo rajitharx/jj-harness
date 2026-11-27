@@ -421,6 +421,18 @@ for (const [name, deps, scripts, expected] of [
     { test: "mocha --watch=false" },
     /`npm run test`/,
   ],
+  ["mocha --ui names an interface", { jest: "29" }, { "test:x": "mocha --ui tdd" }, /e\.g\. `npm run test:x`/],
+  ["watch false as a separate word", { jest: "29" }, { "test:x": "mocha --watch false" }, /e\.g\. `npm run test:x`/],
+  ["watchAll false as a separate word", { vitest: "1" }, { "test:x": "jest --watchAll false" }, /e\.g\. `npm run test:x`/],
+  ["playwright --ui watches", { jest: "29" }, { "test:ui": "playwright test --ui" }, /would hang the gate/],
+  ["node --watch-path watches", { jest: "29" }, { "test:x": "node --watch-path=src --test" }, /would hang the gate/],
+  ["tsx watch watches", { jest: "29" }, { "test:x": "tsx watch --test", "test:y": "mocha" }, /e\.g\. `npm run test:y`/],
+  [
+    "newer node options with values before --test",
+    { jest: "29" },
+    { test: "node --env-file-if-exists .env --test-shard 1/2 --test" },
+    /`node --test`/,
+  ],
   [
     "a script name starting with a dash is ignored",
     { jest: "29" },

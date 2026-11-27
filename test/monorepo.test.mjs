@@ -668,6 +668,7 @@ for (const [name, files, command] of [
   ["an unsafe solution name is passed over", { "A$(id).sln": "", "B.sln": "" }, "dotnet test B.sln"],
   ["only unsafe names: nothing proposed", { "A$(id).sln": "", "B;x.csproj": "" }, undefined],
   ["a lone unsafe name needs no mention", { "A$(id).sln": "" }, "dotnet test"],
+  ["# and & are safe inside quotes", { "C# R&D.sln": "", "App.csproj": "" }, 'dotnet test "C# R&D.sln"'],
 ]) {
   test(`.NET command: ${name}`, () => {
     const d = detectProject(fixture(files));
@@ -690,4 +691,10 @@ test(".NET container tests: a solution that links outside the directory isn't re
   symlinkSync(join(root, "outside.sln"), join(root, "app/App.sln"));
   const d = detectProject(root, { only: ["app"] });
   assert.deepEqual(d.notes.filter((n) => /Testcontainers/.test(n)), []);
+});
+
+test(".NET command: passing over a solution is said", () => {
+  const d = detectProject(fixture({ "A$(id).sln": "", "App.csproj": "" }));
+  assert.equal(shape(d.verify).test[0][1], "dotnet test App.csproj");
+  assert.ok(d.notes.some((n) => /^A solution file was passed over/.test(n)), JSON.stringify(d.notes));
 });

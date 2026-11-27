@@ -701,3 +701,7 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - Second runners behind these aren't seen: quoted environment values with spaces, flags of `c8` or `nyc`, `(mocha)`, `env`, `dotenv`, `pnpm dlx`, `yarn dlx`, `bun x`, `node` running a runner that isn't under `bin/`.
 - A watch mode set in a runner's config file, or through a short flag, isn't noticed.
 - A suggested command can rerun the proposed runner when one script starts both.
+
+**Review round 1** (PR #17, one blocking)
+- `mocha --ui <name>` was read as watch mode; `--ui` now counts only for `vitest` and `playwright test`, and a following `false` switches a watch flag off.
+- Non-blocking, also fixed: more `node` options with values, `--watch-path` and `tsx watch`, `#` and `&` allowed in quoted .NET names, a note when a solution is passed over, and the README's expected warnings.
