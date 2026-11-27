@@ -662,3 +662,39 @@ for (const [name, file, unit] of [
     assert.ok(Date.now() - start < 3000, `${Date.now() - start} ms`);
   });
 }
+
+for (const [name, files, command] of [
+  ["a solution name with spaces is quoted", { "My App.sln": "", "App.csproj": "" }, 'dotnet test "My App.sln"'],
+  ["an unsafe solution name is passed over", { "A$(id).sln": "", "B.sln": "" }, "dotnet test B.sln"],
+  ["only unsafe names: nothing proposed", { "A$(id).sln": "", "B;x.csproj": "" }, undefined],
+  ["a lone unsafe name needs no mention", { "A$(id).sln": "" }, "dotnet test"],
+  ["# and & are safe inside quotes", { "C# R&D.sln": "", "App.csproj": "" }, 'dotnet test "C# R&D.sln"'],
+]) {
+  test(`.NET command: ${name}`, () => {
+    const d = detectProject(fixture(files));
+    assert.equal(shape(d.verify).test?.[0][1], command);
+    assert.ok(!d.notes.some((n) => n.includes("$(id)")), JSON.stringify(d.notes));
+  });
+}
+
+test(".NET container tests: an absolute entry is never suggested", () => {
+  const d = detectProject(
+    fixture({ "App.sln": sln("/abs/U.Tests.csproj", "It/It.Tests.csproj"), "abs/U.Tests.csproj": UNIT, "It/It.Tests.csproj": CONTAINERS }),
+  );
+  const [note] = d.notes.filter((n) => /Testcontainers/.test(n));
+  assert.match(note, /--filter/);
+  assert.doesNotMatch(note, /abs/);
+});
+
+test(".NET container tests: a solution that links outside the directory isn't read", () => {
+  const root = fixture({ "app/x.txt": "", "app/It/It.Tests.csproj": CONTAINERS, "outside.sln": sln("It/It.Tests.csproj") });
+  symlinkSync(join(root, "outside.sln"), join(root, "app/App.sln"));
+  const d = detectProject(root, { only: ["app"] });
+  assert.deepEqual(d.notes.filter((n) => /Testcontainers/.test(n)), []);
+});
+
+test(".NET command: passing over a solution is said", () => {
+  const d = detectProject(fixture({ "A$(id).sln": "", "App.csproj": "" }));
+  assert.equal(shape(d.verify).test[0][1], "dotnet test App.csproj");
+  assert.ok(d.notes.some((n) => /^A solution file was passed over/.test(n)), JSON.stringify(d.notes));
+});

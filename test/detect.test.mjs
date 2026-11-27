@@ -394,6 +394,51 @@ for (const [name, deps, scripts, expected] of [
   ["node without --test", { jest: "29" }, { test: "jest", "test:seed": "node seed.js --test-data" }, null],
   ["a script name with shell syntax is ignored", { jest: "29" }, { test: "jest", "test:$(x)": "mocha" }, null],
   ["no proposed runner: only the existing note", {}, { test: "mocha" }, null],
+  ["--test after the script is the script's argument", { jest: "29" }, { test: "jest", "test:check": "node scripts/check.js --test" }, null],
+  ["--test inside evaluated code", { jest: "29" }, { test: "jest", "test:e": "node -e x --test" }, null],
+  [
+    "node options with values before --test",
+    { jest: "29" },
+    { test: "node --import tsx --require ./setup.js --test" },
+    /`node --test` \(script `test`\)/,
+  ],
+  ["tsx --test", { jest: "29" }, { test: "tsx --test src/*.test.ts" }, /`node --test`/],
+  [
+    "a watching script is named but not suggested",
+    { jest: "29" },
+    { "test:unit": "mocha", "test:watch": "mocha --watch", "test:dev": "npx vitest watch" },
+    /e\.g\. `npm run test:unit` \(/,
+  ],
+  [
+    "only watching scripts: no command",
+    { jest: "29" },
+    { "test:dev": "mocha --watch", "test:ui": "vitest --ui" },
+    /^(?!.*npm run).*would hang the gate/,
+  ],
+  [
+    "watch switched off is runnable",
+    { jest: "29" },
+    { test: "mocha --watch=false" },
+    /`npm run test`/,
+  ],
+  ["mocha --ui names an interface", { jest: "29" }, { "test:x": "mocha --ui tdd" }, /e\.g\. `npm run test:x`/],
+  ["watch false as a separate word", { jest: "29" }, { "test:x": "mocha --watch false" }, /e\.g\. `npm run test:x`/],
+  ["watchAll false as a separate word", { vitest: "1" }, { "test:x": "jest --watchAll false" }, /e\.g\. `npm run test:x`/],
+  ["playwright --ui watches", { jest: "29" }, { "test:ui": "playwright test --ui" }, /would hang the gate/],
+  ["node --watch-path watches", { jest: "29" }, { "test:x": "node --watch-path=src --test" }, /would hang the gate/],
+  ["tsx watch watches", { jest: "29" }, { "test:x": "tsx watch --test", "test:y": "mocha" }, /e\.g\. `npm run test:y`/],
+  [
+    "newer node options with values before --test",
+    { jest: "29" },
+    { test: "node --env-file-if-exists .env --test-shard 1/2 --test" },
+    /`node --test`/,
+  ],
+  [
+    "a script name starting with a dash is ignored",
+    { jest: "29" },
+    { test: "jest", "-x:test": "mocha" },
+    null,
+  ],
 ]) {
   test(`second test runner: ${name}`, () => {
     const d = detectProject(fixture({ "package.json": pkg(deps, { scripts }) }));
@@ -414,9 +459,25 @@ test("second test runner: the suggested command uses the project's package manag
 });
 
 test("second test runner: very long scripts are read in linear time", () => {
-  const scripts = { test: "node " + "bin/".repeat(200_000), "test:b": "(".repeat(500_000), "test:c": "a=".repeat(300_000) };
+  const scripts = {
+    test: "node " + "bin/".repeat(200_000),
+    "test:b": "(".repeat(500_000),
+    "test:c": "a=".repeat(300_000),
+    "test:d": "node ".repeat(200_000),
+  };
   const root = fixture({ "package.json": pkg({ jest: "29" }, { scripts }) });
   const start = Date.now();
   detectProject(root);
   assert.ok(Date.now() - start < 3000, `${Date.now() - start} ms`);
 });
+
+for (const [name, script, expected] of [
+  ["node and --test on one line", "tsc && node --experimental-x --test", "node --test {files}"],
+  ["--test before node doesn't count", "run --test && node a.js", undefined],
+  ["nodemon isn't node", "nodemon --test", undefined],
+]) {
+  test(`node:test is proposed from scripts: ${name}`, () => {
+    const d = detectProject(fixture({ "package.json": pkg({}, { scripts: { test: script } }) }));
+    assert.equal(run(d.verify.test), expected);
+  });
+}
