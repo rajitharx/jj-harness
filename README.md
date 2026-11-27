@@ -119,7 +119,7 @@ The Stop gate checks what changed, never the whole suite:
 - A command with neither runs as written. That suits `typecheck`, which needs the whole project.
 - A path starting with `-` is passed as `./-name`, so it can't be read as an option.
 
-How much "related" means depends on the tool: `vitest related` and `jest --findRelatedTests` follow imports, while `pytest` without testmon or `node --test` only run the changed test files.
+How much "related" means depends on the tool: `vitest related` and `jest --findRelatedTests` follow imports, while `pytest` without testmon or `node --test` only run the changed test files. When a test script also starts a second runner, `harness-init` says so, because the proposed command doesn't run those tests.
 
 ## Hooks
 
