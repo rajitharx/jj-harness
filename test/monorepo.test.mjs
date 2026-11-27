@@ -551,3 +551,52 @@ test("verify runs a package's command from its directory through the CLI", async
   assert.match(r.stdout, /^ok {7}test: \(in apps\/web\) node -e /m);
   assert.match(r.stdout, /verify: passed/);
 });
+
+const CONTAINERS = '<Project><ItemGroup><PackageReference Include="Testcontainers.PostgreSql" /></ItemGroup></Project>';
+const UNIT = '<Project><ItemGroup><PackageReference Include="xunit" /></ItemGroup></Project>';
+const sln = (...paths) =>
+  paths.map((p) => `Project("{FAE04EC0}") = "x", "${p.replaceAll("/", "\\")}", "{0000}"\nEndProject`).join("\n");
+
+for (const [name, files, expected] of [
+  [
+    "a solution with unit and container tests names the project that doesn't need Docker",
+    { "App.sln": sln("tests/Unit/App.UnitTests.csproj", "tests/It/App.IntegrationTests.csproj"), "tests/Unit/App.UnitTests.csproj": UNIT, "tests/It/App.IntegrationTests.csproj": CONTAINERS },
+    /^tests\/It\/App\.IntegrationTests\.csproj references Testcontainers.*`dotnet test tests\/Unit\/App\.UnitTests\.csproj`.*`dotnet build`/,
+  ],
+  [
+    "an .slnx with only container tests offers a filter",
+    { "App.slnx": '<Solution><Project Path="tests/It/It.Tests.csproj" /></Solution>', "tests/It/It.Tests.csproj": CONTAINERS },
+    /^tests\/It\/It\.Tests\.csproj references Testcontainers.*--filter/,
+  ],
+  ["a lone test project that needs Docker", { "App.Tests.csproj": CONTAINERS }, /^App\.Tests\.csproj references Testcontainers/],
+  ["unit tests only: no note", { "App.sln": sln("t/U.Tests.csproj"), "t/U.Tests.csproj": UNIT }, null],
+  [
+    "a commented-out reference doesn't count",
+    { "App.sln": sln("t/U.Tests.csproj"), "t/U.Tests.csproj": `<Project><!-- ${CONTAINERS} --></Project>` },
+    null,
+  ],
+  ["a non-test project using Testcontainers: no note", { "App.sln": sln("src/App.csproj"), "src/App.csproj": CONTAINERS }, null],
+  ["a listed project that is missing: no note", { "App.sln": sln("t/Gone.Tests.csproj") }, null],
+]) {
+  test(`.NET container tests: ${name}`, () => {
+    const d = detectProject(fixture(files));
+    const notes = d.notes.filter((n) => /Testcontainers/.test(n));
+    if (expected === null) assert.deepEqual(notes, []);
+    else {
+      assert.equal(notes.length, 1, JSON.stringify(d.notes));
+      assert.match(notes[0], expected);
+    }
+    // The proposal itself is never narrowed.
+    assert.deepEqual(shape(d.verify).test, [[".", "dotnet test"]]);
+  });
+}
+
+test(".NET container tests: a solution can't point detection outside its directory", () => {
+  const root = fixture({
+    "app/App.sln": sln("../outside/It.Tests.csproj"),
+    "outside/It.Tests.csproj": CONTAINERS,
+  });
+  const d = detectProject(root, { only: ["app"] });
+  assert.deepEqual(d.notes.filter((n) => /Testcontainers/.test(n)), []);
+});
+
