@@ -551,3 +551,114 @@ test("verify runs a package's command from its directory through the CLI", async
   assert.match(r.stdout, /^ok {7}test: \(in apps\/web\) node -e /m);
   assert.match(r.stdout, /verify: passed/);
 });
+
+const CONTAINERS = '<Project><ItemGroup><PackageReference Include="Testcontainers.PostgreSql" /></ItemGroup></Project>';
+const UNIT = '<Project><ItemGroup><PackageReference Include="xunit" /></ItemGroup></Project>';
+const sln = (...paths) =>
+  paths.map((p) => `Project("{FAE04EC0}") = "x", "${p.replaceAll("/", "\\")}", "{0000}"\nEndProject`).join("\n");
+
+for (const [name, files, expected] of [
+  [
+    "a solution with unit and container tests names the project that doesn't need Docker",
+    { "App.sln": sln("tests/Unit/App.UnitTests.csproj", "tests/It/App.IntegrationTests.csproj"), "tests/Unit/App.UnitTests.csproj": UNIT, "tests/It/App.IntegrationTests.csproj": CONTAINERS },
+    /^tests\/It\/App\.IntegrationTests\.csproj references Testcontainers.*`dotnet build && dotnet test tests\/Unit\/App\.UnitTests\.csproj`/,
+  ],
+  [
+    "an .slnx with only container tests offers a filter",
+    { "App.slnx": '<Solution><Project Path="tests/It/It.Tests.csproj" /></Solution>', "tests/It/It.Tests.csproj": CONTAINERS },
+    /^tests\/It\/It\.Tests\.csproj references Testcontainers.*--filter/,
+  ],
+  ["a lone test project that needs Docker", { "App.Tests.csproj": CONTAINERS }, /^App\.Tests\.csproj references Testcontainers/],
+  ["unit tests only: no note", { "App.sln": sln("t/U.Tests.csproj"), "t/U.Tests.csproj": UNIT }, null],
+  [
+    "a commented-out reference doesn't count",
+    { "App.sln": sln("t/U.Tests.csproj"), "t/U.Tests.csproj": `<Project><!-- ${CONTAINERS} --></Project>` },
+    null,
+  ],
+  ["a non-test project using Testcontainers: no note", { "App.sln": sln("src/App.csproj"), "src/App.csproj": CONTAINERS }, null],
+  ["a listed project that is missing: no note", { "App.sln": sln("t/Gone.Tests.csproj") }, null],
+  [
+    "a missing project is not offered",
+    { "App.sln": sln("t/Gone.Tests.csproj", "t/It.Tests.csproj"), "t/It.Tests.csproj": CONTAINERS },
+    /--filter/,
+  ],
+  [
+    "paths with spaces and apostrophes are quoted",
+    { "App.sln": sln("My App's Tests/My.Tests.csproj", "It/It.Tests.csproj"), "My App's Tests/My.Tests.csproj": UNIT, "It/It.Tests.csproj": CONTAINERS },
+    /`dotnet build && dotnet test "My App's Tests\/My\.Tests\.csproj"`/,
+  ],
+  [
+    "a path with shell syntax is never suggested",
+    { "App.sln": sln("$(touch x).Tests.csproj", "It/It.Tests.csproj"), "$(touch x).Tests.csproj": UNIT, "It/It.Tests.csproj": CONTAINERS },
+    /^(?!.*touch).*--filter/,
+  ],
+  [
+    "a BOM, CRLF line ends and solution folders",
+    { "App.sln": `\uFEFF${sln("It/It.Tests.csproj")}\r\nProject("{2150}") = "src", "src", "{1}"\r\n`.replaceAll("\n", "\r\n"), "It/It.Tests.csproj": CONTAINERS },
+    /^It\/It\.Tests\.csproj references/,
+  ],
+  [
+    "only the solution the command names is read",
+    { "A.sln": sln("u/U.Tests.csproj"), "B.sln": sln("It/It.Tests.csproj"), "u/U.Tests.csproj": UNIT, "It/It.Tests.csproj": CONTAINERS },
+    null,
+  ],
+  [
+    "an ambiguous directory names the build target",
+    { "A.sln": sln("u/U.Tests.csproj", "It/It.Tests.csproj"), "B.sln": "", "u/U.Tests.csproj": UNIT, "It/It.Tests.csproj": CONTAINERS },
+    /`dotnet build A\.sln && /,
+  ],
+  [
+    "single-quoted references and MSTest.Sdk",
+    { "App.sln": sln("a/A.csproj"), "a/A.csproj": "<Project Sdk='MSTest.Sdk/3.0'><PackageReference Include='Testcontainers' /></Project>" },
+    /^a\/A\.csproj references/,
+  ],
+  ["Latest.csproj isn't a test project", { "App.sln": sln("Latest.csproj"), "Latest.csproj": CONTAINERS }, null],
+  [
+    "IsTestProject false wins",
+    { "App.sln": sln("L.Tests.csproj"), "L.Tests.csproj": `<IsTestProject>false</IsTestProject>${CONTAINERS}` },
+    null,
+  ],
+]) {
+  test(`.NET container tests: ${name}`, () => {
+    const d = detectProject(fixture(files));
+    const notes = d.notes.filter((n) => /Testcontainers/.test(n));
+    if (expected === null) assert.deepEqual(notes, []);
+    else {
+      assert.equal(notes.length, 1, JSON.stringify(d.notes));
+      assert.match(notes[0], expected);
+    }
+    // The proposal itself is never narrowed.
+    assert.match(shape(d.verify).test[0][1], /^dotnet test( (A|App)\.sln)?$/);
+  });
+}
+
+test(".NET container tests: a solution can't point detection outside its directory", () => {
+  const root = fixture({
+    "app/App.sln": sln("../outside/It.Tests.csproj"),
+    "outside/It.Tests.csproj": CONTAINERS,
+  });
+  const d = detectProject(root, { only: ["app"] });
+  assert.deepEqual(d.notes.filter((n) => /Testcontainers/.test(n)), []);
+});
+
+test(".NET container tests: a symlink can't point detection outside the project", () => {
+  const root = fixture({ "app/App.sln": sln("link/It.Tests.csproj"), "outside/It.Tests.csproj": CONTAINERS });
+  symlinkSync(join(root, "outside"), join(root, "app/link"));
+  const d = detectProject(root, { only: ["app"] });
+  assert.deepEqual(d.notes.filter((n) => /Testcontainers/.test(n)), []);
+});
+
+for (const [name, file, unit] of [
+  ["blank CRLF lines", "App.sln", "\r\n"],
+  ["unclosed Project( lines", "App.sln", "Project(\n"],
+  ["unclosed comments", "App.slnx", "<!--"],
+  ["unclosed tags", "App.slnx", "<Project "],
+  ["unclosed references", "App.Tests.csproj", "<PackageReference "],
+]) {
+  test(`.NET container tests: ${name} are read in linear time`, () => {
+    const root = fixture({ [file]: unit.repeat(Math.ceil(1_000_000 / unit.length)) });
+    const start = Date.now();
+    detectProject(root);
+    assert.ok(Date.now() - start < 3000, `${Date.now() - start} ms`);
+  });
+}

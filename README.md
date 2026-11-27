@@ -39,7 +39,7 @@ Then, once per project:
 /harness:harness-init
 ```
 
-`harness-init` detects the stacks (Node with npm/pnpm/yarn/bun, Python with uv/poetry/pip, Go, Rust, .NET) and proposes verify commands that check only the changed files. It looks at the root, at its subdirectories, and one level deeper in `apps/`, `packages/` and `services/`, so a monorepo with no root manifest works: each package gets its own commands, run in its own directory. It lists the packages it found, asks which ones the Stop gate should check, tries each command once, asks about anything it can't decide (Rust has no related-test mode, and `dotnet test` runs the whole suite, for example), and then writes:
+`harness-init` detects the stacks (Node with npm/pnpm/yarn/bun, Python with uv/poetry/pip, Go, Rust, .NET) and proposes verify commands that check only the changed files. It looks at the root, at its subdirectories, and one level deeper in `apps/`, `packages/` and `services/`, so a monorepo with no root manifest works: each package gets its own commands, run in its own directory. It lists the packages it found, asks which ones the Stop gate should check, tries each command once, asks about anything it can't decide (Rust has no related-test mode, `dotnet test` runs the whole suite, and .NET test projects that reference Testcontainers need Docker, for example), and then writes:
 
 - `.harness/config.json`, the only file the harness reads per project. An existing one is kept unless you agree to replace it.
 - `CLAUDE.md` and `AGENTS.md`. If they exist, only the block between `<!-- harness:start -->` and `<!-- harness:end -->` is inserted or updated.

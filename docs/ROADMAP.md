@@ -19,6 +19,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | cap | Fit Claude Code's 10,000-character hook-string cap | ✅ |
 | guards | Close the cheapest guard gaps (`allowPaths`, stdin scripts, nested `.git`) | ✅ |
 | 0.3.0 | Release `stats`, `cap` and `guards`; fix stale README monorepo limitation | ✅ |
+| docker-tests | `harness-init` warns about .NET tests that need Docker | ✅ |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -125,6 +126,11 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - [x] `allowPaths` config key (validated in `lib/config.mjs`) exempts exact paths from `protectedPaths`; `guard-paths` honours it
 - [x] `**/.git/**` added to the default protected paths
 - [x] Tests, README config table and defaults block, `ship` skill's protected list, CHANGELOG, rationale
+
+## docker-tests: .NET tests that need Docker ✅
+
+- [x] `harness-init` notes a .NET test project that references Testcontainers, and names the test projects that don't
+- [x] Table-driven fixtures: `.sln`, `.slnx`, lone project, no-note cases, paths outside the directory
 
 ## Completion log
 
@@ -600,3 +606,23 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 **Known gaps:** the 0.1.0 completion log still lists "Detection reads the root directory only"; it is history and was left. The dogfood isn't finished (agents and remaining skills not yet invoked).
 
 **Follow-up (2026-11-25):** the `harness--v0.3.0` tag and GitHub release were created from `main`. The changelog link footer gained `[0.3.0]` and `[0.2.0]` and `[Unreleased]` compares from v0.3.0. `.gitignore` now ignores `.claude/worktrees/` and `.claude/settings.local.json`, so the untracked `.claude/` no longer makes `claude plugin tag` refuse a clean tree.
+
+### docker-tests: .NET tests that need Docker (2026-11-27)
+
+**Shipped:** `detectDotnet` reads the projects listed in the `.sln`/`.slnx` the command runs (or the lone project) and adds a note when a test project references Testcontainers.
+
+**Verified:** `npm test` (see PR), new cases in `test/monorepo.test.mjs`. Found by dogfooding on OnLah: bare `dotnet test` failed 121 of 183 tests with Docker stopped, while the unit project passed 171 of 171 in about 2s.
+
+**Changes from the sketch:** the dogfood note suggested detection could propose the unit test project. It only offers it, because narrowing the command stops compiling projects the unit tests don't reference (an OnLah review found exactly that).
+
+**Known gaps**
+- Only direct `PackageReference`s are seen; Testcontainers pulled in through a shared test library, `Directory.Build.props`, or another service dependency (a local database, Aspire) isn't noticed.
+- From the same dogfood, not fixed: when `jest` is configured with a narrow `testMatch`, `jest --findRelatedTests --passWithNoTests` passes while the package's other runner (`node --test`) never runs. Detection doesn't read the `test` script for a second runner.
+- Also from it: a test command filtered to source extensions misses other files tests read (Markdown, HTML, CSS).
+- A project path with characters outside letters, digits and `_ .,'()+@/-` is ignored, so it is never put into a suggested command.
+
+**Review round 1** (PR #14, four blocking)
+- Regexes backtracked quadratically on malformed input: `.sln` is now matched line by line, tags can't span `<`, and comments are stripped without a regex. Timed tests cover each.
+- Suggested paths are filtered and quoted; missing files, and files that resolve outside the directory, are skipped.
+- The rationale's duplicate item number is fixed.
+- Non-blocking, also fixed: only the target solution is read; stricter test-project detection; the narrower command names the build target when needed.
