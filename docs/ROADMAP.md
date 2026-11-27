@@ -21,6 +21,7 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 | 0.3.0 | Release `stats`, `cap` and `guards`; fix stale README monorepo limitation | ✅ |
 | docker-tests | `harness-init` warns about .NET tests that need Docker | ✅ |
 | dogfood-monorepo | Dogfood the gate, agents and skills on a real monorepo | 🟡 |
+| second-runner | `harness-init` warns about a second JavaScript test runner | ✅ |
 
 ## 0. Scaffold and design sketch ✅
 
@@ -141,6 +142,11 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - [ ] `/harness:ship`
 - [ ] `/harness:harness-init` as a skill (only its CLI was run)
 - [ ] The same in an interactive session (the agents and skills ran headlessly)
+
+## second-runner: a second JavaScript test runner ✅
+
+- [x] `harness-init` notes a `test` script that starts a runner other than the proposed one
+- [x] Table-driven fixtures, including no-note cases and a timed case
 
 ## Completion log
 
@@ -663,3 +669,15 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - `verify` leaves `.harness/` files out of its changed-file count without saying so, so the count differed from `git status`.
 - The headless allowlist denied some compound shell commands, including the manual `dotnet format` calls, so the test-writer session made no explicit format check; the format-on-edit hook did run after each of its four edits. The denials came from the run's setup, not a plugin fault.
 
+### second-runner: a second JavaScript test runner (2026-11-27)
+
+**Shipped:** `detectNode` reads the `test` and `test:*` scripts and notes any runner other than the proposed one, with a command that runs those scripts.
+
+**Verified:** `npm test` (see PR), new cases in `test/detect.test.mjs`. Found by dogfooding: a mobile app's `jest` matched only its render tests, so the proposed command never ran its `node --test` suite and still passed.
+
+**Changes from the sketch:** none beyond the rationale's item: the proposal isn't changed, because the other script is usually a whole-suite command.
+
+**Known gaps**
+- Runners behind wrappers (`run-s`, `turbo`, a shell script, a script not named `test`) aren't seen.
+- A single runner whose config matches only some test files isn't noticed.
+- The script is read as text, not parsed as shell, so a quoted `;` or `&&` can split a command wrongly.

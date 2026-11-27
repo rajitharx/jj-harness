@@ -367,3 +367,56 @@ test("generated npm commands pass every flag through npx to the tool", { skip: !
     assert.deepEqual(printed.map((l) => JSON.parse(l)), [argv], `${stage}: ${r.command}\n${r.output}`);
   });
 });
+
+// [name, devDependencies, scripts, expected note (null: none)]
+for (const [name, deps, scripts, expected] of [
+  [
+    "jest for some tests and node --test for the rest",
+    { jest: "29" },
+    { test: 'tsc -p tsconfig.test.json && node --test ".test-build/*.test.js"', "test:render": "jest" },
+    /^Tests also run with `node --test` \(script `test`\), which the proposed `jest` test command doesn't run.*`npm run test`/,
+  ],
+  [
+    "vitest plus playwright",
+    { vitest: "1" },
+    { test: "vitest run", "test:e2e": "playwright test" },
+    /`playwright test` \(script `test:e2e`\).*`npm run test:e2e`/,
+  ],
+  [
+    "two other runners",
+    { vitest: "1" },
+    { "test:unit": "CI=1 npx mocha", "test:old": "node --experimental-vm-modules node_modules/jest/bin/jest.js" },
+    /`mocha` \(script `test:unit`\) and `jest` \(script `test:old`\).*`npm run test:unit && npm run test:old`/,
+  ],
+  ["one runner in several scripts", { jest: "29" }, { test: "jest", "test:ci": "cross-env CI=1 jest --ci" }, null],
+  ["a runner outside a test script", { jest: "29" }, { test: "jest", e2e: "playwright test" }, null],
+  ["a runner only mentioned as an argument", { jest: "29" }, { test: "jest", "test:setup": "echo mocha" }, null],
+  ["node without --test", { jest: "29" }, { test: "jest", "test:seed": "node seed.js --test-data" }, null],
+  ["a script name with shell syntax is ignored", { jest: "29" }, { test: "jest", "test:$(x)": "mocha" }, null],
+  ["no proposed runner: only the existing note", {}, { test: "mocha" }, null],
+]) {
+  test(`second test runner: ${name}`, () => {
+    const d = detectProject(fixture({ "package.json": pkg(deps, { scripts }) }));
+    const notes = d.notes.filter((n) => /^Tests also run with/.test(n));
+    if (expected === null) assert.deepEqual(notes, []);
+    else {
+      assert.equal(notes.length, 1, JSON.stringify(d.notes));
+      assert.match(notes[0], expected);
+    }
+  });
+}
+
+test("second test runner: the suggested command uses the project's package manager", () => {
+  const d = detectProject(
+    fixture({ "package.json": pkg({ jest: "29" }, { scripts: { test: "node --test" } }), "pnpm-lock.yaml": "" }),
+  );
+  assert.ok(d.notes.some((n) => n.includes("`pnpm run test`")), JSON.stringify(d.notes));
+});
+
+test("second test runner: very long scripts are read in linear time", () => {
+  const scripts = { test: "node " + "bin/".repeat(200_000), "test:b": "(".repeat(500_000), "test:c": "a=".repeat(300_000) };
+  const root = fixture({ "package.json": pkg({ jest: "29" }, { scripts }) });
+  const start = Date.now();
+  detectProject(root);
+  assert.ok(Date.now() - start < 3000, `${Date.now() - start} ms`);
+});

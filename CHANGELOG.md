@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- **`harness-init` warns about a second JavaScript test runner.** When a `test` or `test:*` script starts a runner other than the one in the proposed command (say `node --test` beside `jest`), a note names it and suggests running the script, since the proposed command can pass without running those tests. The proposal is unchanged.
 - **`harness-init` warns about .NET tests that need Docker.** When a test project that `dotnet test` would run (listed in the solution, or the lone project) references a Testcontainers package, a note names it, says the gate would block while Docker is down, and offers the test projects without that reference. The proposed command is unchanged.
 
 ## [0.3.0] - 2026-11-24
