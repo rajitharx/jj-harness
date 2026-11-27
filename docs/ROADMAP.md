@@ -639,13 +639,13 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 
 ### dogfood-monorepo: OnLah (2026-11-27, in progress)
 
-**Shipped:** nothing in the plugin from this entry itself. The project (OnLah: a .NET backend and two Node apps) now has a harness config on its `main` (OnLah PRs #90 and #91). It led to the 0.3.0 README fix and the `docker-tests` step.
+**Shipped:** nothing in the plugin from this entry itself. The project (OnLah: a .NET backend and two Node apps) had a typecheck-only harness config; the expanded one and the new tests are now on its `main` (OnLah PRs #90 and #91). It led to the 0.3.0 README fix and the `docker-tests` step.
 
 **Verified**
 - `init` dry run (0.2.0, and the same proposal on 0.3.0): .NET and three packages detected, with per-package `cwd` commands. The plugin update from 0.2.0 to 0.3.0 worked.
 - Stop gate and format-on-edit (0.3.0, hooks run by hand with hook input on stdin): a badly spaced C# line was reformatted; a broken search rule blocked; a harmless change passed; a tree back at `HEAD` for that file reported `no checks ran`; after the build was added to the command, a compile error in an API file blocked.
 - Headless `claude -p` sessions (about $2.27 for all six):
-  - `harness:test-writer` added 52 cases and changed only the test file; the 223 unit tests passed.
+  - `harness:test-writer` added 52 cases and changed only the test file; the 223 unit tests passed. Format-on-edit ran in this session after each of its four edits (4/4 ok in `stats`).
   - `/harness:review` found that the configured mobile command never ran one of its two test suites, confirmed it and left the working tree unchanged.
   - `/harness:verify` and `/harness:stats` quoted the CLI and said what was not checked.
   - `/harness:plan` wrote a plan file and stopped without changing code.
@@ -661,5 +661,5 @@ Release 0.1.1: the PR #6 review's doc fixes and a visible Stop gate.
 - `jest` and `vitest` commands in a checkout without installed dependencies weren't tried; they may block the gate.
 - The proposed typecheck has no "dependencies not installed" skip; the project kept its own command, which has one.
 - `verify` leaves `.harness/` files out of its changed-file count without saying so, so the count differed from `git status`.
-- The headless allowlist denied some compound shell commands, so `dotnet format` didn't run in the test-writer session. That was the run's setup, not a plugin fault.
+- The headless allowlist denied some compound shell commands, including the manual `dotnet format` calls, so the test-writer session made no explicit format check; the format-on-edit hook did run after each of its four edits. The denials came from the run's setup, not a plugin fault.
 
